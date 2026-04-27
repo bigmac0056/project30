@@ -30,7 +30,10 @@ def list_sessions(
 ):
     return (
         db.query(models.GameSession)
-        .filter(models.GameSession.user_id == current_user.id)
+        .filter(
+            models.GameSession.user_id == current_user.id,
+            models.GameSession.game != '_calibration',
+        )
         .order_by(models.GameSession.played_at.desc())
         .limit(limit)
         .all()
@@ -48,7 +51,10 @@ def get_progress(
 
     all_sessions = (
         db.query(models.GameSession)
-        .filter(models.GameSession.user_id == current_user.id)
+        .filter(
+            models.GameSession.user_id == current_user.id,
+            models.GameSession.game != '_calibration',
+        )
         .order_by(models.GameSession.played_at.desc())
         .all()
     )

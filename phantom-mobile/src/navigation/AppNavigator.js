@@ -30,14 +30,15 @@ function RootNavigator() {
   }
 
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      {!user ? (
-        <>
-          <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-          <Stack.Screen name="Login" component={LoginScreen} options={{ animation: 'slide_from_right' }} />
-          <Stack.Screen name="Register" component={RegisterScreen} options={{ animation: 'slide_from_right' }} />
-        </>
-      ) : null}
+    <Stack.Navigator
+      screenOptions={{ headerShown: false }}
+      initialRouteName={user ? 'Main' : 'Onboarding'}
+    >
+      {/* Auth screens — только для незалогиненных */}
+      <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+      <Stack.Screen name="Login" component={LoginScreen} options={{ animation: 'slide_from_right' }} />
+      <Stack.Screen name="Register" component={RegisterScreen} options={{ animation: 'slide_from_right' }} />
+      {/* App screens */}
       <Stack.Screen name="Calibration" component={CalibrationScreen} />
       <Stack.Screen name="Main" component={TabNavigator} />
       <Stack.Screen name="GameSparrow" component={GameSparrowScreen} options={{ animation: 'slide_from_bottom' }} />
