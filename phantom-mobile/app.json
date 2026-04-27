@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "Phantom",
+    "slug": "phantom-emg",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#F5F2EC"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.phantom.emg"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#F5F2EC"
+      },
+      "package": "com.phantom.emg"
+    },
+    "plugins": [
+      "expo-font"
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+export const PH = {
+  bg: '#F5F2EC',
+  bgAlt: '#FFFFFF',
+  bgSoft: '#EDE9DF',
+  ink: '#1A1A1F',
+  inkDim: '#5C5C68',
+  inkFaint: '#9A9AA8',
+  hair: 'rgba(20,20,30,0.08)',
+  hairStrong: 'rgba(20,20,30,0.16)',
+  lime: '#3D7A1F',
+  limeBright: '#7FCB3A',
+  limeSoft: '#E6F3D4',
+  coral: '#E8553A',
+  violet: '#5B4DD9',
+  violetSoft: '#EAE7FB',
+  ok: '#2A9D5C',
+};
+
+export const FONTS = {
+  sans: 'SpaceGrotesk_400Regular',
+  sansMedium: 'SpaceGrotesk_500Medium',
+  sansSemiBold: 'SpaceGrotesk_600SemiBold',
+  sansBold: 'SpaceGrotesk_700Bold',
+  mono: 'JetBrainsMono_400Regular',
+  monoMedium: 'JetBrainsMono_500Medium',
+};

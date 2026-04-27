@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Phantom — EMG тренажёр</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; background: #F5F2EC; font-family: 'Inter', system-ui, sans-serif; }
+  body { overflow: hidden; }
+  * { box-sizing: border-box; }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="frames/ios-frame.jsx"></script>
+<script type="text/babel" src="frames/design-canvas.jsx"></script>
+<script type="text/babel" src="frames/tweaks-panel.jsx"></script>
+<script type="text/babel" src="components/shared.jsx"></script>
+<script type="text/babel" src="components/screens.jsx"></script>
+<script type="text/babel" src="components/desktop.jsx"></script>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "difficulty": "novice",
+  "emgLevel": 0,
+  "showThreshold": true
+}/*EDITMODE-END*/;
+
+function App() {
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const emg = t.emgLevel / 100;
+  const threshSparrow = t.difficulty === 'novice' ? 0.35 : 0.55;
+  const threshPulse = t.difficulty === 'novice' ? 0.45 : 0.65;
+
+  return (
+    <>
+      <DesignCanvas>
+        <DCSection id="intro" title="Phantom · EMG тренажёр" subtitle="Тренажёр для подготовки культи к бионическому протезу. Управляется напряжением мышцы: датчик EMG → Arduino → игра. Светлая тема — спокойнее на длинных сессиях.">
+          <DCArtboard id="onb" label="01 · Onboarding" width={390} height={780}>
+            <ScreenOnboarding />
+          </DCArtboard>
+          <DCArtboard id="cal" label="02 · Калибровка" width={390} height={780}>
+            <ScreenCalibration />
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="main" title="Основной флоу" subtitle="Главная → Каталог → Геймплей → Результаты. Все игры используют один и тот же сигнал EMG, но тренируют разные навыки.">
+          <DCArtboard id="home" label="03 · Главная" width={390} height={780}>
+            <ScreenHome />
+          </DCArtboard>
+          <DCArtboard id="cat" label="04 · Каталог игр" width={390} height={780}>
+            <ScreenCatalog />
+          </DCArtboard>
+          <DCArtboard id="res" label="05 · Результаты" width={390} height={780}>
+            <ScreenResults />
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="games" title="Три игры — три навыка" subtitle="Sparrow тренирует активацию (включи мышцу). Pulse Run — точность импульса (короткий резкий толчок). Steady Climb — дозирование силы (держи сигнал в узкой зоне). Все три навыка нужны для управления бионическим протезом.">
+          <DCArtboard id="g-sp" label="Sparrow · удержание" width={390} height={780}>
+            <ScreenGameSparrow emgLevel={emg} threshold={threshSparrow} />
+          </DCArtboard>
+          <DCArtboard id="g-pr" label="Pulse Run · импульс" width={390} height={780}>
+            <ScreenGamePulseRun emgLevel={emg} threshold={threshPulse} />
+          </DCArtboard>
+          <DCArtboard id="g-sc" label="Steady Climb · дозирование" width={390} height={780}>
+            <ScreenGameSteadyClimb emgLevel={emg} />
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="rep" title="Прогресс и врач" subtitle="Самотрекинг для пациента + одна функция для специалиста — PDF-отчёт по нажатию.">
+          <DCArtboard id="prog" label="06 · Прогресс" width={390} height={780}>
+            <ScreenProgress />
+          </DCArtboard>
+          <DCArtboard id="set" label="07 · Настройки" width={390} height={780}>
+            <ScreenSettings />
+          </DCArtboard>
+          <DCArtboard id="pdf" label="08 · PDF-отчёт" width={390} height={780}>
+            <ScreenDoctorPDF />
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="dt" title="Desktop версия — все три игры" subtitle="Большой экран = расширенный HUD, живая EMG-волна, окно браузера или приложения. Удобно для долгих домашних сессий с ноутбуком на столе.">
+          <DCArtboard id="desk-sp" label="09 · Desktop · Sparrow" width={960} height={600}>
+            <ScreenDesktop emgLevel={emg} threshold={threshSparrow} />
+          </DCArtboard>
+          <DCArtboard id="desk-pr" label="10 · Desktop · Pulse Run" width={960} height={600}>
+            <ScreenDesktopPulseRun emgLevel={emg} threshold={threshPulse} />
+          </DCArtboard>
+          <DCArtboard id="desk-sc" label="11 · Desktop · Steady Climb" width={960} height={600}>
+            <ScreenDesktopSteadyClimb emgLevel={emg} />
+          </DCArtboard>
+        </DCSection>
+
+        <DCPostIt top={-30} left={420} rotate={-3}>
+          Светлая бумажная палитра + лаймовый сигнал EMG. Мотив «живой волны» проходит через все экраны.
+        </DCPostIt>
+
+        <DCPostIt top={-30} left={1400} rotate={2} width={220}>
+          Tweaks справа → крути EMG-ползунок: птица в Sparrow, бегун в Pulse Run и альпинист в Steady реагируют в реальном времени.
+        </DCPostIt>
+
+        <DCPostIt top={-30} left={2400} rotate={-2} width={220}>
+          Каждая игра — отдельный навык: активация / импульс / дозирование. Вместе = готовность к протезу.
+        </DCPostIt>
+      </DesignCanvas>
+
+      <TweaksPanel title="Phantom · Tweaks">
+        <TweakSection label="Симулятор сигнала">
+          <TweakSlider label="Уровень EMG" value={t.emgLevel} min={0} max={100} unit="%"
+            onChange={(v) => setTweak('emgLevel', v)} />
+          <div style={{ fontSize: 11, color: '#5C5C68', lineHeight: 1.4, marginTop: -4, marginBottom: 8 }}>
+            Имитирует напряжение мышцы. Двигай ползунок и смотри, как реагируют все три игры.
+          </div>
+        </TweakSection>
+        <TweakSection label="Сложность">
+          <TweakRadio label="Порог срабатывания" value={t.difficulty}
+            options={[
+              { value: 'novice', label: 'Новичок' },
+              { value: 'pro', label: 'Продвинутый' },
+            ]}
+            onChange={(v) => setTweak('difficulty', v)} />
+        </TweakSection>
+      </TweaksPanel>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
