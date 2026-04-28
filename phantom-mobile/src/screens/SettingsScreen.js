@@ -1,15 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Switch,
   TouchableOpacity, Alert, TextInput, Modal, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PH, FONTS } from '../constants/theme';
 import Card from '../components/Card';
 import { GhostBtn, PrimaryBtn } from '../components/Buttons';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
+import { useNotifications } from '../hooks/useNotifications';
+import AchievementsCard from '../components/AchievementsCard';
+import { computeAchievements } from '../utils/achievements';
 
 function SettingRow({ label, value, children, onPress }) {
   const Wrap = onPress ? TouchableOpacity : View;
@@ -48,6 +52,7 @@ function DifficultyToggle({ value, onChange }) {
 
 export default function SettingsScreen({ navigation }) {
   const { user, logout, updateUser } = useAuth();
+  const { scheduleReminder, cancelReminder } = useNotifications();
   const [sound, setSound] = useState(true);
   const [reminders, setReminders] = useState(true);
   const [difficulty, setDifficulty] = useState('beginner');
@@ -56,6 +61,7 @@ export default function SettingsScreen({ navigation }) {
   const [editAmp, setEditAmp] = useState('');
   const [editWeeks, setEditWeeks] = useState('');
   const [saving, setSaving] = useState(false);
+  const [achievements, setAchievements] = useState([]);
 
   // Load saved preferences
   useEffect(() => {
@@ -63,6 +69,21 @@ export default function SettingsScreen({ navigation }) {
     AsyncStorage.getItem('sound').then(v => { if (v !== null) setSound(v === 'true'); });
     AsyncStorage.getItem('reminders').then(v => { if (v !== null) setReminders(v === 'true'); });
   }, []);
+
+  // Load achievements whenever screen is focused
+  useFocusEffect(useCallback(() => {
+    (async () => {
+      try {
+        const [progress, sessions] = await Promise.all([api.getProgress(), api.getSessions()]);
+        setAchievements(computeAchievements(progress, sessions));
+        // Re-schedule reminder with current streak
+        const saved = await AsyncStorage.getItem('reminders');
+        if (saved !== 'false') {
+          scheduleReminder(progress?.streak_days ?? 0);
+        }
+      } catch {}
+    })();
+  }, []));
 
   const handleDifficulty = async (val) => {
     setDifficulty(val);
@@ -77,6 +98,14 @@ export default function SettingsScreen({ navigation }) {
   const handleReminders = async (val) => {
     setReminders(val);
     await AsyncStorage.setItem('reminders', String(val));
+    if (val) {
+      try {
+        const progress = await api.getProgress();
+        await scheduleReminder(progress?.streak_days ?? 0);
+      } catch { await scheduleReminder(0); }
+    } else {
+      await cancelReminder();
+    }
   };
 
   const openEdit = () => {
@@ -194,6 +223,11 @@ export default function SettingsScreen({ navigation }) {
             />
           }
         />
+
+        {/* Achievements */}
+        {achievements.length > 0 && (
+          <AchievementsCard achievements={achievements} />
+        )}
 
         {/* App info */}
         <View style={s.infoSection}>

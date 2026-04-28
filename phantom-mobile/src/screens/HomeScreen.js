@@ -16,9 +16,9 @@ import { api } from '../services/api';
 const { width } = Dimensions.get('window');
 
 const MINI_GAMES = [
-  { title: 'Sparrow', kind: 'sparrow', route: 'GameSparrow' },
-  { title: 'Pulse Run', kind: 'pulse', route: 'GamePulseRun' },
-  { title: 'Steady', kind: 'climb', route: 'GameSteadyClimb' },
+  { title: 'Sparrow',   kind: 'sparrow', route: 'GameSparrow',     apiKey: 'Sparrow',      color: PH.lime   },
+  { title: 'Pulse Run', kind: 'pulse',   route: 'GamePulseRun',    apiKey: 'Pulse Run',    color: PH.violet },
+  { title: 'Steady',    kind: 'climb',   route: 'GameSteadyClimb', apiKey: 'Steady Climb', color: PH.coral  },
 ];
 
 const DAYS_RU = ['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'];
@@ -80,7 +80,7 @@ export default function HomeScreen({ navigation }) {
             <Text style={styles.metaItem}>⌁ 12 мин</Text>
             <Text style={styles.metaItem}>○ 3 игры</Text>
           </View>
-          <PrimaryBtn full onPress={() => navigation.navigate('GameSparrow')}>
+          <PrimaryBtn full onPress={() => navigation.navigate('GameStart', { game: 'Sparrow', route: 'GameSparrow', color: PH.lime })}>
             Начать тренировку →
           </PrimaryBtn>
         </LinearGradient>
@@ -126,7 +126,7 @@ export default function HomeScreen({ navigation }) {
             <TouchableOpacity
               key={g.kind}
               style={styles.miniCard}
-              onPress={() => navigation.navigate(g.route)}
+              onPress={() => navigation.navigate('GameStart', { game: g.apiKey, route: g.route, color: g.color })}
               activeOpacity={0.75}
             >
               <GameCover kind={g.kind} width="100%" height={80} />

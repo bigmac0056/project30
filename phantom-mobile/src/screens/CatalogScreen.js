@@ -80,7 +80,7 @@ export default function CatalogScreen({ navigation }) {
               <TouchableOpacity
                 key={g.kind}
                 activeOpacity={0.75}
-                onPress={() => navigation.navigate(g.route)}
+                onPress={() => navigation.navigate('GameStart', { game: g.apiKey, route: g.route, color: g.color })}
               >
                 <Card padded={false} style={styles.gameCard}>
                   <View style={styles.gameRow}>

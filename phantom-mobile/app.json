@@ -21,7 +21,15 @@
       "package": "com.phantom.emg"
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#A8CC5C",
+          "sounds": []
+        }
+      ]
     ]
   }
 }

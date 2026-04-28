@@ -15,6 +15,7 @@ import GamePulseRunScreen from '../screens/GamePulseRunScreen';
 import GameSteadyClimbScreen from '../screens/GameSteadyClimbScreen';
 import ResultsScreen from '../screens/ResultsScreen';
 import DoctorPDFScreen from '../screens/DoctorPDFScreen';
+import GameStartModal from '../screens/GameStartModal';
 
 const Stack = createNativeStackNavigator();
 
@@ -46,6 +47,7 @@ function RootNavigator() {
       <Stack.Screen name="GameSteadyClimb" component={GameSteadyClimbScreen} options={{ animation: 'slide_from_bottom' }} />
       <Stack.Screen name="Results" component={ResultsScreen} options={{ animation: 'slide_from_bottom' }} />
       <Stack.Screen name="DoctorPDF" component={DoctorPDFScreen} options={{ animation: 'slide_from_right' }} />
+      <Stack.Screen name="GameStart" component={GameStartModal} options={{ animation: 'slide_from_bottom', presentation: 'modal' }} />
     </Stack.Navigator>
   );
 }
