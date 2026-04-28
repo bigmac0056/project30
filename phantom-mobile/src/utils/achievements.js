@@ -128,11 +128,11 @@ export function computeAchievements(progress, sessions = []) {
   const uniqueGames = new Set(sessions.map(s => s.game));
   const gamesPlayed = uniqueGames.size;
 
-  // API returns 0–1 floats; scale to 0–100 for achievement checks
+  // API returns 0–100 scores (averaged from stored session scores)
   const skills = {
-    activation: (progress?.activation_avg ?? 0) * 100,
-    precision:  (progress?.precision_avg  ?? 0) * 100,
-    control:    (progress?.dosing_avg     ?? 0) * 100,
+    activation: progress?.activation_avg ?? 0,
+    precision:  progress?.precision_avg  ?? 0,
+    control:    progress?.dosing_avg     ?? 0,
   };
 
   const ctx = { streak, totalMinutes, totalSessions, gamesPlayed, skills };
