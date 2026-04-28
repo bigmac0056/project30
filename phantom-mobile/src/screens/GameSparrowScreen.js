@@ -1,11 +1,10 @@
 /**
- * GameSparrowScreen — Ghost Mode + Timed
- * ────────────────────────────────────────
- * Changes from v1:
- *  • Ghost mode: hitting a pipe no longer kills the bird — it flashes red briefly
- *  • Time-based: receives durationMin from GameStartModal, counts down
- *  • Game ends when timer = 0 → auto-navigate to Results
- *  • Device disconnect: pauses game and shows a "reconnect" overlay
+ * GameSparrowScreen — Ghost Mode + Timed + Live Sensor
+ * ──────────────────────────────────────────────────────
+ * EMG source priority:
+ *   1. Live Arduino data via useSensor() when device is connected (50 Hz)
+ *   2. Touch fallback (onPressIn/Out) when no device — for dev/demo
+ * devicePaused overlay only appears when WS is up but Arduino unplugs mid-game.
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
@@ -16,6 +15,7 @@ import Svg, { Path, Circle, Ellipse, Rect } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
 import { PH, FONTS } from '../constants/theme';
+import { useSensor } from '../hooks/useSensor';
 
 const { width: W, height: H } = Dimensions.get('window');
 const GROUND_Y   = H - 160;
@@ -84,6 +84,40 @@ export default function GameSparrowScreen({ navigation, route }) {
   const birdFlash     = useRef(new Animated.Value(1)).current; // opacity for hit flash
 
   const setPhaseSync = (p) => { phaseRef.current = p; setPhase(p); };
+
+  // ── Live sensor ───────────────────────────────────────────
+  const { wsConnected, deviceConnected, sensorData } = useSensor();
+
+  // sensorData fires at ~50 Hz when Arduino is connected.
+  // Writes directly to emgRef so the rAF game loop picks it up every frame.
+  useEffect(() => {
+    if (!deviceConnected || !sensorData) return;
+    const norm = Math.max(0, Math.min(1, sensorData.norm ?? 0));
+    emgRef.current = norm;
+    setEmgLevel(norm);
+    // Auto-start: first significant squeeze starts the game
+    if (norm > 0.15 && phaseRef.current === 'idle') {
+      startTimeRef.current = Date.now();
+      lastSecRef.current = null;
+      setPhaseSync('playing');
+    }
+  }, [sensorData, deviceConnected]);
+
+  // Pause when Arduino unplugs mid-game; resume on reconnect.
+  // When WS is fully down (!wsConnected) → silent touch fallback, no overlay.
+  useEffect(() => {
+    if (!wsConnected) return;
+    if (!deviceConnected) {
+      setDevicePaused(true);
+      if (phaseRef.current === 'playing') setPhaseSync('paused');
+    } else {
+      setDevicePaused(false);
+      if (phaseRef.current === 'paused') {
+        lastSecRef.current = null; // reset timer ref so tick starts fresh
+        setPhaseSync('playing');
+      }
+    }
+  }, [deviceConnected, wsConnected]);
 
   // ── Flash animation on ghost hit ──────────────────────────
   const triggerHitFlash = () => {
@@ -309,19 +343,25 @@ export default function GameSparrowScreen({ navigation, route }) {
         <Text style={s.emgVal}>{Math.round(emgLevel * 100)}%</Text>
       </View>
 
-      {/* Touch zone */}
-      <TouchableOpacity
-        style={s.touch}
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
-        activeOpacity={1}
-      />
+      {/* Touch zone — only when no Arduino connected (fallback/demo mode) */}
+      {!deviceConnected && (
+        <TouchableOpacity
+          style={s.touch}
+          onPressIn={handlePressIn}
+          onPressOut={handlePressOut}
+          activeOpacity={1}
+        />
+      )}
 
       {/* Idle hint */}
       {phase === 'idle' && (
         <View style={s.hint}>
-          <View style={s.hintDot} />
-          <Text style={s.hintText}>Зажми экран — взлетай, отпусти — падай</Text>
+          <View style={[s.hintDot, { backgroundColor: deviceConnected ? PH.limeBright : PH.lime }]} />
+          <Text style={s.hintText}>
+            {deviceConnected
+              ? 'Сожми мышцу — взлетай'
+              : 'Зажми экран — взлетай, отпусти — падай'}
+          </Text>
         </View>
       )}
 

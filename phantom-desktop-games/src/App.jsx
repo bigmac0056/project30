@@ -3,6 +3,7 @@ import { PH } from './theme';
 import GameSparrow from './games/sparrow/GameSparrow';
 import GamePulseRun from './games/pulserun/GamePulseRun';
 import GameSteadyClimb from './games/steadyclimb/GameSteadyClimb';
+import { useSensor } from './hooks/useSensor';
 
 const GAMES = [
   {
@@ -21,6 +22,7 @@ const GAMES = [
 
 export default function App() {
   const [activeGame, setActiveGame] = useState(null);
+  const { wsConnected, deviceConnected } = useSensor();
 
   if (activeGame === 'sparrow') return <GameSparrow onBack={() => setActiveGame(null)} />;
   if (activeGame === 'pulse')   return <GamePulseRun onBack={() => setActiveGame(null)} />;
@@ -34,9 +36,24 @@ export default function App() {
         <span style={css.brandSub}>EMG Тренажёр · Desktop</span>
       </div>
 
+      {/* Sensor status bar */}
+      <div style={{ ...css.sensorBar, borderColor: deviceConnected ? `${PH.lime}55` : wsConnected ? `${PH.coral}33` : PH.hair }}>
+        <span style={{ ...css.sensorBarDot, background: deviceConnected ? PH.limeBright : wsConnected ? PH.coral : PH.inkFaint,
+          boxShadow: deviceConnected ? `0 0 8px ${PH.limeBright}` : 'none' }} />
+        <span style={{ fontFamily: PH.fontMono, fontSize: 11, letterSpacing: '0.08em', color: PH.inkDim }}>
+          {deviceConnected ? 'Arduino подключён · Режим датчика активен'
+            : wsConnected ? 'Бэкенд доступен · Arduino не найден'
+            : 'Нет соединения · Режим симуляции (ПРОБЕЛ / ЛКМ)'}
+        </span>
+      </div>
+
       <p style={css.intro}>
         Три игры — три навыка для управления бионическим протезом.<br />
-        <span style={css.hint}>Управление: зажми <kbd style={css.kbd}>ПРОБЕЛ</kbd> или удержи <kbd style={css.kbd}>ЛКМ</kbd> — это симулирует напряжение мышцы.</span>
+        <span style={css.hint}>
+          {deviceConnected
+            ? 'Управление: сожми мышцу — это управляет игрой напрямую.'
+            : <>Управление: зажми <kbd style={css.kbd}>ПРОБЕЛ</kbd> или удержи <kbd style={css.kbd}>ЛКМ</kbd> — это симулирует напряжение мышцы.</>}
+        </span>
       </p>
 
       <div style={css.grid}>
@@ -103,4 +120,10 @@ const css = {
   },
   footer: { marginTop: 40 },
   footerTxt: { fontFamily: PH.fontMono, fontSize: 11, color: PH.inkFaint, letterSpacing: '0.06em' },
+  sensorBar: {
+    display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20,
+    padding: '8px 16px', borderRadius: 999, border: '1px solid',
+    background: 'rgba(255,255,255,0.6)',
+  },
+  sensorBarDot: { width: 8, height: 8, borderRadius: '50%', display: 'inline-block', flexShrink: 0 },
 };

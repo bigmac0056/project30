@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { PH } from '../../theme';
+import { useSensor } from '../../hooks/useSensor';
 
 const W = window.innerWidth, H = window.innerHeight;
 const TARGET_MIN = 0.40, TARGET_MAX = 0.62;
@@ -15,11 +16,13 @@ const CHECKPOINTS = [
 ];
 
 export default function GameSteadyClimb({ onBack }) {
+  const { deviceConnected, sensorData } = useSensor();
+
   const canvasRef = useRef(null);
   const stateRef = useRef({
     emg: 0, score: 0, hold: 0, meters: 0,
     phase: 'idle', pressing: false, lastTime: null,
-    climberProgress: 0, // 0..1
+    climberProgress: 0, sensorActive: false,
   });
   const [ui, setUi] = useState({ score: 0, hold: 0, meters: 0, emg: 0, phase: 'idle', inZone: false });
   const rafRef = useRef(null);
@@ -31,6 +34,15 @@ export default function GameSteadyClimb({ onBack }) {
     st.climberProgress = 0; st.lastTime = null; st.phase = 'idle';
     setUi({ score: 0, hold: 0, meters: 0, emg: 0, phase: 'idle', inZone: false });
   };
+
+  // Live sensor → stateRef.current.emg
+  useEffect(() => {
+    stateRef.current.sensorActive = deviceConnected;
+    if (!deviceConnected || !sensorData) return;
+    const norm = Math.max(0, Math.min(1, sensorData.norm ?? 0));
+    stateRef.current.emg = norm;
+    if (norm > 0.15 && stateRef.current.phase === 'idle') setPhase('playing');
+  }, [sensorData, deviceConnected]);
 
   useEffect(() => {
     const onDown = (e) => {
@@ -60,9 +72,11 @@ export default function GameSteadyClimb({ onBack }) {
       const dt = Math.min((time - st.lastTime) / 1000, 0.1); // in seconds
       st.lastTime = time;
 
-      // EMG
-      if (st.pressing) st.emg = Math.min(st.emg + 0.035 / (1 / 60), 1);
-      else st.emg = Math.max(st.emg - 0.03 / (1 / 60), 0);
+      // EMG rise/fall (keyboard/mouse fallback — skip when live sensor is active)
+      if (!st.sensorActive) {
+        if (st.pressing) st.emg = Math.min(st.emg + 0.035 / (1 / 60), 1);
+        else st.emg = Math.max(st.emg - 0.03 / (1 / 60), 0);
+      }
 
       const rawDt = dt; // actual seconds
       if (st.pressing) {
@@ -155,15 +169,18 @@ export default function GameSteadyClimb({ onBack }) {
             <span style={{ ...css.scoreVal, color: PH.coral }}>{meters}m</span>
           </div>
         </div>
-        <div style={css.sensorPill}>
-          <span style={css.sensorDot} /> SENSOR · SIM
+        <div style={{ ...css.sensorPill, borderColor: deviceConnected ? `${PH.coral}55` : PH.hair }}>
+          <span style={{ ...css.sensorDot, background: deviceConnected ? PH.coral : PH.inkFaint, boxShadow: deviceConnected ? `0 0 10px ${PH.coral}` : 'none' }} />
+          {deviceConnected ? 'SENSOR · LIVE' : 'SENSOR · SIM'}
         </div>
       </div>
 
       {phase === 'idle' && (
         <div style={css.hint}>
           <span style={{ ...css.hintDot, background: PH.coral, boxShadow: `0 0 8px ${PH.coral}` }} />
-          Зажми <kbd style={css.kbd}>ПРОБЕЛ</kbd> или <kbd style={css.kbd}>ЛКМ</kbd> плавно — удержи в зелёной зоне!
+          {deviceConnected
+            ? 'Удерживай сжатие в зелёной зоне — чем дольше, тем выше!'
+            : <>Зажми <kbd style={css.kbd}>ПРОБЕЛ</kbd> или <kbd style={css.kbd}>ЛКМ</kbd> плавно — удержи в зелёной зоне!</>}
         </div>
       )}
     </div>

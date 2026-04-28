@@ -65,6 +65,20 @@ class SessionOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CalibrationCreate(BaseModel):
+    threshold : float = 0.42   # 0–1, activation threshold (typically 60 % of peak)
+    max_emg   : float = 1.0    # 0–1, peak reading observed during calibration
+
+
+class CalibrationOut(BaseModel):
+    id            : int
+    threshold     : float
+    max_emg       : float
+    calibrated_at : datetime
+
+    model_config = {"from_attributes": True}
+
+
 class ProgressOut(BaseModel):
     total_sessions: int
     total_minutes: int

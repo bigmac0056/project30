@@ -1,11 +1,9 @@
 /**
- * GameSteadyClimbScreen — Timed + Duration Picker
- * ─────────────────────────────────────────────────
- * Changes from v1:
- *  • Receives durationMin from GameStartModal; counts down
- *  • Game ends when timer = 0 → auto-navigate to Results
- *  • "Завершить" button visible after 5 metres (early finish)
- *  • Device disconnect overlay
+ * GameSteadyClimbScreen — Timed + Live Sensor
+ * ─────────────────────────────────────────────
+ * EMG source priority:
+ *   1. Live Arduino via useSensor() — hold signal in target zone to climb
+ *   2. Touch fallback when no device (press and hold)
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
@@ -16,6 +14,7 @@ import Svg, { Path, Circle, G, Rect } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
 import { PH, FONTS } from '../constants/theme';
+import { useSensor } from '../hooks/useSensor';
 
 const { width: W, height: H } = Dimensions.get('window');
 const TARGET_MIN = 0.30;
@@ -55,6 +54,36 @@ export default function GameSteadyClimbScreen({ navigation, route }) {
   const lastSecRef   = useRef(null);
 
   const setPhaseS = (p) => { phaseRef.current = p; setPhase(p); };
+
+  const { wsConnected, deviceConnected, sensorData } = useSensor();
+
+  // Live sensor → emgRef
+  useEffect(() => {
+    if (!deviceConnected || !sensorData) return;
+    const norm = Math.max(0, Math.min(1, sensorData.norm ?? 0));
+    emgRef.current = norm;
+    setEmgLevel(norm);
+    if (norm > 0.15 && phaseRef.current === 'idle') {
+      startTimeRef.current = Date.now();
+      lastSecRef.current = null;
+      setPhaseS('playing');
+    }
+  }, [sensorData, deviceConnected]);
+
+  // Device connect / disconnect overlay
+  useEffect(() => {
+    if (!wsConnected) return;
+    if (!deviceConnected) {
+      setDevicePaused(true);
+      if (phaseRef.current === 'playing') setPhaseS('paused');
+    } else {
+      setDevicePaused(false);
+      if (phaseRef.current === 'paused') {
+        lastSecRef.current = null;
+        setPhaseS('playing');
+      }
+    }
+  }, [deviceConnected, wsConnected]);
 
   const reset = useCallback(() => {
     emgRef.current = 0;       setEmgLevel(0);
@@ -255,12 +284,14 @@ export default function GameSteadyClimbScreen({ navigation, route }) {
         </View>
       </View>
 
-      <TouchableOpacity style={s.touch} onPressIn={handlePressIn} onPressOut={handlePressOut} activeOpacity={1} />
+      {!deviceConnected && (
+        <TouchableOpacity style={s.touch} onPressIn={handlePressIn} onPressOut={handlePressOut} activeOpacity={1} />
+      )}
 
       {phase === 'idle' && (
         <View style={s.hint}>
           <View style={[s.hintDot, { backgroundColor: PH.coral }]} />
-          <Text style={s.hintText}>Зажми так, чтобы попасть в зелёную зону</Text>
+          <Text style={s.hintText}>{deviceConnected ? 'Удерживай сжатие в зелёной зоне' : 'Зажми так, чтобы попасть в зелёную зону'}</Text>
         </View>
       )}
 

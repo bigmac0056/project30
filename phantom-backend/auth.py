@@ -7,9 +7,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 import models
 
-SECRET_KEY = "phantom-emg-secret-key-change-in-production"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_DAYS = 30
+from config import SECRET_KEY, ALGORITHM, TOKEN_DAYS as ACCESS_TOKEN_EXPIRE_DAYS
 
 bearer = HTTPBearer()
 

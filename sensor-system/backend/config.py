@@ -1,11 +1,14 @@
 """
-Backend configuration.
-In production, load these from environment variables.
+sensor-system/backend/config.py
+─────────────────────────────────
+Standalone sensor backend configuration (used when running sensor-system/backend
+independently for testing/demo). Production deployments use phantom-backend instead.
 """
+import os
 
-# Secret token the bridge must send in the X-Device-Token header.
-# Must match BRIDGE_CONFIG["device_token"] in bridge/config.py
-DEVICE_TOKEN = "phantom-bridge-secret"
-
-# CORS origins allowed to connect (React dev server, production URL, etc.)
-ALLOWED_ORIGINS = ["*"]
+DEVICE_TOKEN  : str       = os.environ.get("DEVICE_TOKEN",  "phantom-bridge-secret")
+_orig         : str       = os.environ.get("ALLOWED_ORIGINS", "*")
+ALLOWED_ORIGINS: list[str] = (
+    ["*"] if _orig == "*"
+    else [o.strip() for o in _orig.split(",") if o.strip()]
+)

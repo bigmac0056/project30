@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { PH } from '../../theme';
 import EMGWave from '../../shared/EMGWave';
+import { useSensor } from '../../hooks/useSensor';
 
 const W = window.innerWidth, H = window.innerHeight;
 const GROUND = H - 120;
@@ -17,12 +18,14 @@ function makeObs() {
 }
 
 export default function GamePulseRun({ onBack }) {
+  const { deviceConnected, sensorData } = useSensor();
+
   const canvasRef = useRef(null);
   const stateRef = useRef({
     emg: 0, runnerY: 0, vel: 0,
     jumping: false, obs: makeObs(),
     score: 0, phase: 'idle',
-    pressing: false, lastTime: null,
+    pressing: false, lastTime: null, sensorActive: false,
   });
   const [ui, setUi] = useState({ score: 0, emg: 0, phase: 'idle', jumping: false });
   const rafRef = useRef(null);
@@ -35,6 +38,15 @@ export default function GamePulseRun({ onBack }) {
     st.lastTime = null; st.phase = 'idle';
     setUi({ score: 0, emg: 0, phase: 'idle', jumping: false });
   };
+
+  // Live sensor → stateRef.current.emg
+  useEffect(() => {
+    stateRef.current.sensorActive = deviceConnected;
+    if (!deviceConnected || !sensorData) return;
+    const norm = Math.max(0, Math.min(1, sensorData.norm ?? 0));
+    stateRef.current.emg = norm;
+    if (norm > 0.15 && stateRef.current.phase === 'idle') setPhase('playing');
+  }, [sensorData, deviceConnected]);
 
   useEffect(() => {
     const onDown = (e) => {
@@ -66,8 +78,10 @@ export default function GamePulseRun({ onBack }) {
       const dt = Math.min((time - st.lastTime) / 16.67, 3);
       st.lastTime = time;
 
-      if (st.pressing) st.emg = Math.min(st.emg + 0.06 * dt, 1);
-      else st.emg = Math.max(st.emg - 0.05 * dt, 0);
+      if (!st.sensorActive) {
+        if (st.pressing) st.emg = Math.min(st.emg + 0.06 * dt, 1);
+        else st.emg = Math.max(st.emg - 0.05 * dt, 0);
+      }
 
       if (st.phase === 'playing') {
         // Jump trigger
@@ -169,15 +183,18 @@ export default function GamePulseRun({ onBack }) {
             <span style={css.scoreVal}>2 / 8</span>
           </div>
         </div>
-        <div style={css.sensorPill}>
-          <span style={css.sensorDot} /> SENSOR · SIM
+        <div style={{ ...css.sensorPill, borderColor: deviceConnected ? `${PH.violet}55` : PH.hair }}>
+          <span style={{ ...css.sensorDot, background: deviceConnected ? PH.violet : PH.coral, boxShadow: deviceConnected ? `0 0 10px ${PH.violet}` : 'none' }} />
+          {deviceConnected ? 'SENSOR · LIVE' : 'SENSOR · SIM'}
         </div>
       </div>
 
       {phase === 'idle' && (
         <div style={css.hint}>
           <span style={{ ...css.hintDot, background: PH.violet, boxShadow: `0 0 8px ${PH.violet}` }} />
-          Резко зажми <kbd style={css.kbd}>ПРОБЕЛ</kbd> или <kbd style={css.kbd}>ЛКМ</kbd> — прыжок!
+          {deviceConnected
+            ? 'Резкое сжатие мышцы — прыжок!'
+            : <>Резко зажми <kbd style={css.kbd}>ПРОБЕЛ</kbd> или <kbd style={css.kbd}>ЛКМ</kbd> — прыжок!</> }
         </div>
       )}
 

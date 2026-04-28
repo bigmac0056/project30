@@ -1,11 +1,19 @@
 # Phantom — EMG Rehabilitation App
 
-A full-stack rehabilitation system for stroke patients and amputees. Patients train their residual limb muscles through biofeedback games — preparing for a bionic prosthetic.
+A full-stack rehabilitation system for stroke patients and amputees. Patients train their residual limb muscles through biofeedback games, preparing for a bionic prosthetic.
 
 ```
-Arduino Sensor ──USB──► Python Bridge ──WS──► FastAPI ──WS──► React Native App
-                                                   └──────────────► React Web (desktop)
+Arduino ──USB──► Bridge laptop ──────────────────────────────────────────┐
+                 (Python bridge)    (FastAPI, port 8000)                  │
+                      │                   │                               │
+                 serial read         REST API + WebSocket                 │
+                      └──► /ws/device ──►  /ws/client ◄──────────────────┤
+                                                │                         │
+                                    React Native (phone, Wi-Fi) ◄────────┘
+                                    React Web (desktop game, Wi-Fi)
 ```
+
+**One backend, one port.** The same FastAPI process handles auth/sessions/calibration (REST) and real-time sensor data (WebSocket). The bridge laptop runs both the backend and the Python serial bridge.
 
 ---
 
@@ -13,16 +21,42 @@ Arduino Sensor ──USB──► Python Bridge ──WS──► FastAPI ──
 
 ```
 insult-project/
-├── phantom-backend/        FastAPI REST + JWT auth + session tracking
-├── phantom-mobile/         Expo React Native app (iOS / Android)
-├── phantom-desktop-games/  Web-based game prototypes
-├── sensor-system/          Arduino → real-time sensor pipeline
-│   ├── arduino/            Sensor sketch (.ino)
-│   ├── bridge/             Python serial-to-WebSocket bridge
-│   ├── backend/            Standalone FastAPI for real-time sensor streaming
-│   ├── web/                React hooks + components for live sensor data
-│   └── mobile/             React Native hooks + components for live sensor data
-└── components/             Shared design assets / frames
+├── phantom-backend/          FastAPI — REST + JWT + sensor WebSocket (unified)
+│   ├── main.py               App factory + router mount
+│   ├── config.py             All settings from env vars
+│   ├── manager.py            ConnectionManager (WS fan-out)
+│   ├── routers/
+│   │   ├── auth_router.py    POST /auth/register, /auth/login
+│   │   ├── users.py          GET/PATCH /users/me
+│   │   ├── sessions.py       POST /sessions, GET /sessions, GET /sessions/progress
+│   │   ├── calibration.py    POST /calibration, GET /calibration/latest
+│   │   └── sensor.py         WS /ws/device, WS /ws/client, GET /api/status
+│   └── tests/
+│       └── test_api.py       pytest — auth, sessions, calibration, sensor status
+│
+├── sensor-system/
+│   ├── arduino/              Arduino IDE sketch (.ino) — reads EMG sensor
+│   └── bridge/               Python serial-to-WebSocket bridge
+│       ├── bridge.py         Main loop (serial → WS → backend)
+│       ├── serial_reader.py  Thin pyserial wrapper with JSON parsing
+│       ├── config.py         All settings from env vars
+│       └── tests/
+│           └── test_bridge.py  pytest — SerialReader unit tests
+│
+├── phantom-mobile/           Expo React Native app (iOS / Android)
+│   └── src/
+│       ├── config.js         BASE_URL + WS_URL from EXPO_PUBLIC_* env vars
+│       ├── hooks/useSensor.js  WS hook — exposes wsConnected, deviceConnected, sensorData
+│       ├── services/api.js   All REST calls (auth, sessions, calibration)
+│       └── screens/          Game screens + CalibrationScreen + ProgressScreen …
+│
+├── phantom-desktop-games/    Vite + React — browser-based games
+│   └── src/
+│       ├── hooks/useSensor.js  Same WS hook (reads VITE_WS_URL)
+│       ├── App.jsx           Launcher with live sensor status badge
+│       └── games/            Sparrow, PulseRun, SteadyClimb — sensor-wired
+│
+└── components/               Shared design assets / mockup frames
 ```
 
 ---
@@ -34,185 +68,270 @@ insult-project/
 | Mobile app | Expo SDK 54 · React Native 0.81 |
 | Navigation | React Navigation 6 (stack + bottom tabs) |
 | Auth | JWT (python-jose) · AsyncStorage token persistence |
-| Backend | FastAPI · SQLAlchemy · SQLite |
-| Password hashing | PBKDF2-HMAC-SHA256 (native Python hashlib) |
-| PDF reports | expo-print · expo-sharing |
-| Real-time sensor | WebSocket · pyserial |
+| Backend | FastAPI · SQLAlchemy · SQLite (swap to Postgres for prod) |
+| Real-time | WebSocket (`/ws/device` for bridge · `/ws/client` for apps) |
+| Bridge | Python · pyserial · websockets |
+| Arduino | EMG sensor → JSON over Serial at 9600 baud |
 | Fonts | Space Grotesk · JetBrains Mono |
 
 ---
 
-## Quick Start
+## Deployment Flow (bridge laptop)
 
-### 1. Backend (REST API)
+Everything runs on one laptop connected to the Arduino via USB. Phones and desktops connect over Wi-Fi.
+
+```
+Bridge laptop
+├── uvicorn main:app --host 0.0.0.0 --port 8000   (phantom-backend)
+└── python bridge.py                                (sensor-system/bridge)
+
+Phone / desktop (same Wi-Fi network)
+└── connects to http://LAPTOP_IP:8000  (REST)
+    and         ws://LAPTOP_IP:8000/ws/client  (live sensor)
+```
+
+---
+
+## Setup
+
+### 1. Find your laptop's LAN IP
+
+```bash
+# macOS / Linux
+ip route get 1 | awk '{print $7; exit}'
+# or
+hostname -I | awk '{print $1}'
+
+# Windows (PowerShell)
+(Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias Wi-Fi).IPAddress
+```
+
+Use this IP everywhere below. We'll call it `LAPTOP_IP`.
+
+---
+
+### 2. Backend (unified REST + WebSocket)
 
 ```bash
 cd phantom-backend
+cp .env.example .env           # edit SECRET_KEY, DEVICE_TOKEN, ALLOWED_ORIGINS
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-> **Health check:** `curl http://localhost:8000/health` → `{"status":"ok"}`
+**Health check:**
+```bash
+curl http://localhost:8000/health   # → {"status":"ok"}
+curl http://localhost:8000/api/status  # → {"device_connected":false,...}
+```
 
-**Edit the IP in mobile app** — `phantom-mobile/src/services/api.js`:
-```js
-export const BASE_URL = 'http://YOUR_LAPTOP_IP:8000';
+`phantom-backend/.env.example`:
+```
+SECRET_KEY=change-me-to-a-random-32-char-string
+DEVICE_TOKEN=bridge-secret-token
+DATABASE_URL=sqlite:///./phantom.db
+ALLOWED_ORIGINS=*
 ```
 
 ---
 
-### 2. Mobile App
+### 3. Arduino sketch
+
+Open `sensor-system/arduino/sensor.ino` in Arduino IDE 2.x.
+Select your board (e.g. Arduino Uno) and the correct port, then upload.
+
+Expected Serial output at **9600 baud**:
+```json
+{"ecg":512,"norm":0.5005,"v":2.500,"ms":4230}
+```
+
+- `ecg` — raw ADC value (0–1023)
+- `norm` — normalised 0.0–1.0 (used directly as game input)
+- `v` — voltage in volts
+- `ms` — millis() timestamp
+
+---
+
+### 4. Python bridge (serial → backend WebSocket)
+
+```bash
+cd sensor-system/bridge
+cp .env.example .env      # set SERIAL_PORT + DEVICE_TOKEN (must match backend .env)
+pip install -r requirements.txt
+python bridge.py
+```
+
+**Find your serial port:**
+
+| OS | Command |
+|---|---|
+| macOS | `ls /dev/tty.*` → usually `/dev/tty.usbmodem*` |
+| Linux | `ls /dev/ttyACM*` → usually `/dev/ttyACM0` |
+| Windows | Device Manager → Ports (COM & LPT) |
+
+`sensor-system/bridge/.env.example`:
+```
+SERIAL_PORT=/dev/ttyACM0
+BAUDRATE=9600
+WS_URL=ws://localhost:8000/ws/device
+DEVICE_TOKEN=bridge-secret-token
+SAMPLE_HZ=50
+```
+
+---
+
+### 5. Mobile app (Expo)
 
 ```bash
 cd phantom-mobile
+cp .env.example .env       # set EXPO_PUBLIC_API_URL and EXPO_PUBLIC_WS_URL
 npm install
 npx expo start
 ```
 
-Scan the QR code with **Expo Go** (iOS / Android). Make sure your phone and laptop are on the **same Wi-Fi**.
+Scan the QR code with **Expo Go** on your phone. Your phone must be on the **same Wi-Fi** as the bridge laptop.
+
+`phantom-mobile/.env.example`:
+```
+EXPO_PUBLIC_API_URL=http://192.168.1.x:8000
+EXPO_PUBLIC_WS_URL=ws://192.168.1.x:8000/ws/client
+```
 
 ---
 
-### 3. Sensor Bridge (Arduino → App)
+### 6. Desktop games (Vite)
 
-Only needed when connecting a real Arduino EMG/ECG sensor.
-
-**a) Upload the sketch**
-
-Open `sensor-system/arduino/sensor.ino` in Arduino IDE, select your board and port, upload.
-
-Expected Serial output at 9600 baud:
-```
-{"ecg":512,"norm":0.5005,"v":2.500,"ms":4230}
-```
-
-**b) Start the backend**
 ```bash
-cd sensor-system/backend
-pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8000
+cd phantom-desktop-games
+cp .env.example .env       # set VITE_WS_URL
+npm install
+npm run dev                # opens at http://localhost:5173
 ```
 
-**c) Start the bridge**
-```bash
-cd sensor-system/bridge
-pip install -r requirements.txt
-# Edit serial_port in config.py first!
-python bridge.py
+`phantom-desktop-games/.env.example`:
+```
+VITE_WS_URL=ws://192.168.1.x:8000/ws/client
 ```
 
-**d) Find your serial port**
+---
 
-| OS | Command |
+## EMG Input — Sensor vs Touch Fallback
+
+All game screens and the calibration screen automatically select the input source:
+
+| State | Input |
 |---|---|
-| macOS | `ls /dev/tty.*` |
-| Linux | `ls /dev/ttyACM*` |
-| Windows | Device Manager → Ports (COM & LPT) |
+| `deviceConnected = true` | Live `sensorData.norm` (0–1) from Arduino |
+| `deviceConnected = false, wsConnected = true` | Touch / keyboard simulation + disconnect overlay |
+| `wsConnected = false` | Touch / keyboard simulation (backend unreachable — silent) |
+
+**Only when `wsConnected && !deviceConnected`** does the game pause and show the "Device disconnected" overlay. If the backend is simply unreachable (offline dev), the app stays in silent touch mode.
+
+**Auto-start:** When `sensorData.norm > 0.15` fires while a game is in `idle` phase, the game starts automatically — no screen tap needed.
 
 ---
 
-## Features
+## Calibration
 
-### Auth Flow
-- **Register** with name, email, password, amputation level
-- **Login** → JWT stored in AsyncStorage → auto-restored on next launch
-- Profile editing (name, amputation level, weeks to fitting)
-- Logout with confirmation
+The calibration screen captures the user's **maximum voluntary contraction**, then sets:
 
-### Games
-All games use EMG signal (simulated via touch, or real Arduino sensor):
+```
+threshold = peak * 0.60
+```
 
-| Game | Skill trained | Mechanic |
-|---|---|---|
-| **Sparrow** | Muscle activation | Hold squeeze → bird flies, release → bird falls |
-| **Pulse Run** | Impulse precision | Short contractions → jump over obstacles |
-| **Steady Climb** | Force dosing | Keep signal in narrow target range |
+The result is saved via `POST /calibration` (not as a game session).
 
-- Adjustable difficulty (Beginner / Advanced)
-- Each session saves: score, duration, EMG peak/avg, skill scores
-- Post-game Results screen with EMG wave chart
+**Sensor mode** (device connected): watch the live EMG bar rise, press "Захватить пик" at maximum contraction.  
+**Touch fallback** (no device): press and hold the touch target to simulate the signal, release to capture.
 
-### Progress Tracking
-- 7-day bar chart (daily minutes)
-- Streak counter
-- 3 skill bars with delta vs previous sessions
-- Week-over-week % change
-- Pull-to-refresh
-
-### Doctor PDF Report
-- Generates a real PDF from live API data
-- Includes: patient info, 7-day summary, skill bars, notes
-- Native share sheet (iOS / Android)
-
-### Real-time Sensor (Arduino)
-- 50 Hz data stream: Arduino → Python bridge → FastAPI WebSocket → app
-- Auto-reconnects on serial disconnect or network drop
-- Device status indicator (connected / not connected)
-- Drop-in hook: `const { sensorData, deviceConnected } = useSensor()`
+The saved calibration is retrieved via `GET /calibration/latest` — future game screens can use this to adapt their THRESHOLD dynamically.
 
 ---
 
 ## API Reference
 
 ### Auth
-| Method | Endpoint | Body | Returns |
+| Method | Path | Body | Returns |
 |---|---|---|---|
 | POST | `/auth/register` | `{email, name, password, amputation_level?, weeks_to_fitting?}` | `{access_token, user}` |
 | POST | `/auth/login` | `{email, password}` | `{access_token, user}` |
 
 ### Users
-| Method | Endpoint | Returns |
+| Method | Path | Returns |
 |---|---|---|
 | GET | `/users/me` | User object |
 | PATCH | `/users/me` | Updated user |
 
 ### Sessions
-| Method | Endpoint | Returns |
+| Method | Path | Returns |
 |---|---|---|
 | POST | `/sessions` | Created session |
-| GET | `/sessions` | List (last 50, no calibration) |
+| GET | `/sessions` | Last 50 sessions |
 | GET | `/sessions/progress` | Streak, skill avgs, daily chart |
 
-### Sensor (sensor-system/backend)
-| Type | Endpoint | Description |
+### Calibration
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| POST | `/calibration` | `{threshold, max_emg}` | Calibration record |
+| GET | `/calibration/latest` | — | Most recent calibration or 404 |
+
+### Sensor (real-time)
+| Type | Path | Description |
 |---|---|---|
-| WebSocket | `/ws/device` | Bridge → backend (auth token required) |
-| WebSocket | `/ws/client` | App → receive live data |
-| GET | `/api/status` | Device + client count |
+| WebSocket | `/ws/device` | Bridge → backend (`X-Device-Token` header required) |
+| WebSocket | `/ws/client` | Apps ← receive live sensor data |
+| GET | `/api/status` | `{device_connected, clients_connected, latest}` |
 | GET | `/api/latest` | Last sensor reading |
-| GET | `/health` | Health check |
+| GET | `/health` | `{"status":"ok"}` |
 
 ---
 
 ## WebSocket Message Format
 
-**From backend to clients:**
+**Backend → clients (fan-out):**
 ```json
-// On connect or device state change:
-{ "type": "device_status", "connected": true, "latest": {...} }
+// On client connect or device state change:
+{"type":"device_status","connected":true,"latest":{"ecg":512,"norm":0.5,"v":2.5,"ms":12345}}
 
 // Every sensor reading (~50 Hz):
-{ "type": "sensor_data", "payload": { "ecg": 512, "norm": 0.5005, "v": 2.5 }, "ts": 1714300000.1 }
+{"type":"sensor_data","payload":{"ecg":512,"norm":0.5,"v":2.5,"ms":12345},"ts":1714300000.1}
+```
+
+**Bridge → backend (`/ws/device`):**
+```json
+{"type":"data","payload":{"ecg":512,"norm":0.5,"v":2.5,"ms":12345},"ts":1714300000.1}
 ```
 
 ---
 
-## Integrating Real Sensor into Games
+## Games
 
-The existing games use touch simulation. To switch to real Arduino data:
+| Game | Skill | Mechanic | Input |
+|---|---|---|---|
+| **Sparrow** | Activation | Hold squeeze → bird flies; release → falls | `norm > THRESHOLD` → lift |
+| **Pulse Run** | Impulse precision | Sharp contraction → jump over obstacles | `norm > THRESHOLD` → jump trigger |
+| **Steady Climb** | Force dosing | Keep signal in target zone (30–68 % of max) | `norm ∈ [TARGET_MIN, TARGET_MAX]` → score |
 
-```js
-// In any game screen:
-import { useSensor } from '../hooks/useSensor';  // sensor-system/mobile/src/hooks
+All games record: score, duration, EMG peak, EMG average, activation/precision/dosing skill scores.
 
-const { sensorData, deviceConnected } = useSensor();
+---
 
-useEffect(() => {
-  // norm is already 0.0–1.0, same scale the games expect
-  emgRef.current = sensorData?.norm ?? 0;
-}, [sensorData]);
+## Running Tests
+
+**Backend (from `phantom-backend/`):**
+```bash
+pip install pytest httpx
+pytest tests/ -v
 ```
+
+**Bridge (from `sensor-system/bridge/`):**
+```bash
+pip install pytest
+pytest tests/ -v
+```
+
+No hardware required — tests use in-memory SQLite and pyserial mocks.
 
 ---
 
@@ -220,20 +339,22 @@ useEffect(() => {
 
 | Problem | Fix |
 |---|---|
-| "Cannot connect to server" on iPhone | Use laptop LAN IP, not `localhost`. Same Wi-Fi required. |
+| "Cannot connect to server" on phone | Use LAN IP (not `localhost`). Phone and laptop must be on same Wi-Fi. |
 | `EACCES` on serial port (Linux) | `sudo usermod -a -G dialout $USER` then re-login |
-| Expo SDK mismatch | `cd phantom-mobile && npx expo install --fix` |
-| `python-jose` or `bcrypt` error on Python 3.13 | Already fixed — uses native `hashlib.pbkdf2_hmac` |
+| `permission denied` on serial (macOS) | Run bridge from Terminal, not an IDE terminal |
 | Serial port busy | Close Arduino IDE Serial Monitor before running bridge |
+| WS sensor pill shows "SIM" | Backend not reachable, or bridge not running. Check `.env` IPs. |
+| `DEVICE_TOKEN` mismatch | Backend `.env` and bridge `.env` must have same token value |
 | PDF share not available | Runs on device only — simulator has no share sheet |
+| Expo SDK mismatch | `cd phantom-mobile && npx expo install --fix` |
 
 ---
 
-## Environment
+## Environment Requirements
 
-- Python 3.11+ recommended (3.13 works)
+- Python 3.11+ (3.13 works)
 - Node.js 18+
-- Expo Go app on your phone
+- Expo Go on your phone (iOS / Android)
 - Arduino IDE 2.x for uploading the sketch
 
 ---

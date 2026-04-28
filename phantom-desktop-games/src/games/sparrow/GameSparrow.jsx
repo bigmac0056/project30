@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { PH } from '../../theme';
 import EMGWave from '../../shared/EMGWave';
+import { useSensor } from '../../hooks/useSensor';
 
 const W = window.innerWidth, H = window.innerHeight;
 const GROUND = H - 100;
@@ -16,12 +17,14 @@ function makePipes() {
 }
 
 export default function GameSparrow({ onBack }) {
+  const { deviceConnected, sensorData } = useSensor();
+
   const canvasRef = useRef(null);
   const stateRef = useRef({
     emg: 0, birdY: H * 0.42, vel: 0,
     pipes: makePipes(), score: 0, combo: 0,
     phase: 'idle', pressing: false,
-    lastTime: null,
+    lastTime: null, sensorActive: false,
   });
   const [ui, setUi] = useState({ score: 0, combo: 0, emg: 0, phase: 'idle' });
   const rafRef = useRef(null);
@@ -34,6 +37,15 @@ export default function GameSparrow({ onBack }) {
     setUi({ score: 0, combo: 0, emg: 0, phase: 'idle' });
     st.phase = 'idle';
   };
+
+  // Live sensor → stateRef.current.emg
+  useEffect(() => {
+    stateRef.current.sensorActive = deviceConnected;
+    if (!deviceConnected || !sensorData) return;
+    const norm = Math.max(0, Math.min(1, sensorData.norm ?? 0));
+    stateRef.current.emg = norm;
+    if (norm > 0.15 && stateRef.current.phase === 'idle') setPhase('playing');
+  }, [sensorData, deviceConnected]);
 
   // EMG simulation via SPACE or LMB
   useEffect(() => {
@@ -71,9 +83,11 @@ export default function GameSparrow({ onBack }) {
       const dt = Math.min((time - st.lastTime) / 16.67, 3);
       st.lastTime = time;
 
-      // EMG rise/fall
-      if (st.pressing) st.emg = Math.min(st.emg + 0.05 * dt, 1);
-      else st.emg = Math.max(st.emg - 0.04 * dt, 0);
+      // EMG rise/fall (keyboard/mouse fallback — skip when live sensor is active)
+      if (!st.sensorActive) {
+        if (st.pressing) st.emg = Math.min(st.emg + 0.05 * dt, 1);
+        else st.emg = Math.max(st.emg - 0.04 * dt, 0);
+      }
 
       if (st.phase === 'playing') {
         // Physics
@@ -173,8 +187,9 @@ export default function GameSparrow({ onBack }) {
             <span style={css.scoreVal}>4 / 12</span>
           </div>
         </div>
-        <div style={css.sensorPill}>
-          <span style={css.sensorDot} /> SENSOR · SIM
+        <div style={{ ...css.sensorPill, borderColor: deviceConnected ? `${PH.lime}55` : PH.hair }}>
+          <span style={{ ...css.sensorDot, background: deviceConnected ? PH.limeBright : PH.coral, boxShadow: deviceConnected ? `0 0 10px ${PH.limeBright}` : 'none' }} />
+          {deviceConnected ? 'SENSOR · LIVE' : 'SENSOR · SIM'}
         </div>
       </div>
 
@@ -191,7 +206,9 @@ export default function GameSparrow({ onBack }) {
       {phase === 'idle' && (
         <div style={css.hint}>
           <span style={css.hintDot} />
-          Удерживай <kbd style={css.kbd}>ПРОБЕЛ</kbd> или <kbd style={css.kbd}>ЛКМ</kbd> — взлетай, отпусти — падай
+          {deviceConnected
+            ? 'Сожми мышцу — взлетай, расслабь — падай'
+            : <>Удерживай <kbd style={css.kbd}>ПРОБЕЛ</kbd> или <kbd style={css.kbd}>ЛКМ</kbd> — взлетай, отпусти — падай</>}
         </div>
       )}
 

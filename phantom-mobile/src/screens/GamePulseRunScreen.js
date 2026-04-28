@@ -1,10 +1,9 @@
 /**
- * GamePulseRunScreen — Ghost Mode + Timed
- * ─────────────────────────────────────────
- * Changes from v1:
- *  • Ghost mode: hitting an obstacle flashes the runner but doesn't end the game
- *  • Time-based: receives durationMin, counts down, auto-navigates to Results
- *  • Device disconnect overlay (pauses game until sensor reconnected)
+ * GamePulseRunScreen — Ghost Mode + Timed + Live Sensor
+ * ───────────────────────────────────────────────────────
+ * EMG source priority:
+ *   1. Live Arduino via useSensor() when device connected — short spikes trigger jumps
+ *   2. Touch fallback when no device (onPressIn/Out ramp)
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
@@ -15,6 +14,7 @@ import Svg, { Path, Circle, Rect, Ellipse, G } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
 import { PH, FONTS } from '../constants/theme';
+import { useSensor } from '../hooks/useSensor';
 
 const { width: W, height: H } = Dimensions.get('window');
 const GROUND    = H - 150;
@@ -68,6 +68,36 @@ export default function GamePulseRunScreen({ navigation, route }) {
   const runnerFlash  = useRef(new Animated.Value(1)).current;
 
   const setPhaseS = (p) => { phaseRef.current = p; setPhase(p); };
+
+  // ── Live sensor ───────────────────────────────────────────
+  const { wsConnected, deviceConnected, sensorData } = useSensor();
+
+  useEffect(() => {
+    if (!deviceConnected || !sensorData) return;
+    const norm = Math.max(0, Math.min(1, sensorData.norm ?? 0));
+    emgRef.current = norm;
+    setEmgLevel(norm);
+    // Auto-start on first muscle activation
+    if (norm > 0.15 && phaseRef.current === 'idle') {
+      startTimeRef.current = Date.now();
+      lastSecRef.current = null;
+      setPhaseS('playing');
+    }
+  }, [sensorData, deviceConnected]);
+
+  useEffect(() => {
+    if (!wsConnected) return;
+    if (!deviceConnected) {
+      setDevicePaused(true);
+      if (phaseRef.current === 'playing') setPhaseS('paused');
+    } else {
+      setDevicePaused(false);
+      if (phaseRef.current === 'paused') {
+        lastSecRef.current = null;
+        setPhaseS('playing');
+      }
+    }
+  }, [deviceConnected, wsConnected]);
 
   const triggerHitFlash = () => {
     hitTimeRef.current = Date.now();
@@ -276,12 +306,17 @@ export default function GamePulseRunScreen({ navigation, route }) {
         </View>
       </View>
 
-      <TouchableOpacity style={s.touch} onPressIn={handlePressIn} onPressOut={handlePressOut} activeOpacity={1} />
+      {/* Touch zone — fallback/demo mode when no Arduino */}
+      {!deviceConnected && (
+        <TouchableOpacity style={s.touch} onPressIn={handlePressIn} onPressOut={handlePressOut} activeOpacity={1} />
+      )}
 
       {phase === 'idle' && (
         <View style={s.hint}>
           <View style={[s.hintDot, { backgroundColor: PH.violet }]} />
-          <Text style={s.hintText}>Резко зажми экран — прыжок!</Text>
+          <Text style={s.hintText}>
+            {deviceConnected ? 'Резкое сжатие мышцы — прыжок!' : 'Резко зажми экран — прыжок!'}
+          </Text>
         </View>
       )}
 

@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Line, Path, Rect } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
 import { PH, FONTS } from '../constants/theme';
 import Card from '../components/Card';
 import Pill from '../components/Pill';
@@ -11,6 +11,7 @@ import EMGWave from '../components/EMGWave';
 import ArmIllustration from '../components/ArmIllustration';
 import { PrimaryBtn, GhostBtn } from '../components/Buttons';
 import { api } from '../services/api';
+import { useSensor } from '../hooks/useSensor';
 
 function StepDots({ current = 2, total = 3 }) {
   return (
@@ -29,19 +30,30 @@ function StepDots({ current = 2, total = 3 }) {
 }
 
 export default function CalibrationScreen({ navigation }) {
-  const [connected] = useState(true);
-  const [pressing, setPressing] = useState(false);
-  const [emgLevel, setEmgLevel] = useState(0);
+  const { deviceConnected, sensorData } = useSensor();
+
+  const [pressing, setPressing]   = useState(false);
+  const [emgLevel, setEmgLevel]   = useState(0);
   const [threshold, setThreshold] = useState(0.42);
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving]       = useState(false);
   const [calibrated, setCalibrated] = useState(false);
 
-  const emgRef = useRef(0);
+  const emgRef      = useRef(0);
   const pressingRef = useRef(false);
-  const peakRef = useRef(0);
+  const peakRef     = useRef(0);
 
-  // Simulate EMG on press
+  // ── Live sensor → emgRef (when device is connected) ──────────────
   useEffect(() => {
+    if (!deviceConnected || !sensorData) return;
+    const norm = Math.max(0, Math.min(1, sensorData.norm ?? 0));
+    emgRef.current = norm;
+    setEmgLevel(norm);
+    if (norm > peakRef.current) peakRef.current = norm;
+  }, [sensorData, deviceConnected]);
+
+  // ── Touch simulation (fallback when no device) ───────────────────
+  useEffect(() => {
+    if (deviceConnected) return;     // sensor owns emgRef — skip
     let timer;
     const rise = () => {
       if (!pressingRef.current) return;
@@ -59,10 +71,10 @@ export default function CalibrationScreen({ navigation }) {
     if (pressing) { pressingRef.current = true; rise(); }
     else { pressingRef.current = false; fall(); }
     return () => clearTimeout(timer);
-  }, [pressing]);
+  }, [pressing, deviceConnected]);
 
-  // Set threshold at 60% of peak
-  const handleMaxPress = () => {
+  // ── Capture peak and compute threshold ───────────────────────────
+  const handleCapturePeak = () => {
     if (peakRef.current > 0.1) {
       const computed = Math.round(peakRef.current * 0.6 * 100) / 100;
       setThreshold(computed);
@@ -70,20 +82,15 @@ export default function CalibrationScreen({ navigation }) {
     }
   };
 
+  // ── Save calibration to /calibration endpoint ─────────────────────
   const handleSave = async () => {
     setSaving(true);
     try {
-      await api.createSession({
-        game: '_calibration',
-        score: 0,
-        duration_sec: 0,
-        emg_peak: peakRef.current || threshold,
-        emg_avg: threshold,
-        activation_score: 0,
-        precision_score: 0,
-        dosing_score: 0,
+      await api.saveCalibration({
+        threshold,
+        max_emg: peakRef.current > 0 ? peakRef.current : threshold,
       });
-    } catch {/* ok if fails, just navigate */}
+    } catch {/* tolerate offline — navigate anyway */}
     setSaving(false);
     navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
   };
@@ -112,17 +119,21 @@ export default function CalibrationScreen({ navigation }) {
 
         <Text style={styles.title}>Калибровка{'\n'}сигнала</Text>
         <Text style={styles.subtitle}>
-          Зажми экран — симулируй сигнал мышцы. Подержи максимальное напряжение, затем отпусти.
+          {deviceConnected
+            ? 'Датчик подключён. Сожми мышцу до максимума, затем нажми «Захватить пик».'
+            : 'Зажми экран — симулируй сигнал мышцы. Подержи максимальное напряжение, затем отпусти.'}
         </Text>
 
         {/* Sensor card */}
         <Card raised style={styles.sensorCard}>
           <View style={styles.sensorHeader}>
             <View style={styles.sensorLeft}>
-              <View style={[styles.dot, { backgroundColor: PH.limeBright }]} />
+              <View style={[styles.dot, { backgroundColor: deviceConnected ? PH.limeBright : PH.coral }]} />
               <Text style={styles.sensorName}>Phantom Sensor</Text>
             </View>
-            <Pill color={PH.lime}>{connected ? 'Подключён' : 'Поиск...'}</Pill>
+            <Pill color={deviceConnected ? PH.lime : PH.coral}>
+              {deviceConnected ? 'Подключён' : 'Не подключён'}
+            </Pill>
           </View>
           <View style={styles.armWrap}>
             <ArmIllustration width={260} active={emgLevel > 0.1} />
@@ -163,26 +174,56 @@ export default function CalibrationScreen({ navigation }) {
 
         {/* Instructions */}
         <Card padded={false} style={styles.instrCard}>
-          <TouchableOpacity
-            style={styles.instrBtn}
-            onPressIn={() => setPressing(true)}
-            onPressOut={() => { setPressing(false); handleMaxPress(); }}
-            activeOpacity={1}
-          >
-            <View style={[styles.instrDot, { backgroundColor: pressing ? PH.lime : PH.bgSoft, borderColor: pressing ? PH.lime : PH.hairStrong }]}>
-              <Text style={[styles.instrDotTxt, { color: pressing ? PH.bg : PH.inkFaint }]}>
-                {pressing ? `${emgPct}%` : '▼'}
-              </Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.instrTitle}>
-                {pressing ? 'Держи максимальное усилие...' : 'Зажми и держи'}
-              </Text>
-              <Text style={styles.instrSub}>
-                {calibrated ? `Порог: ${thresholdPct}% · Нажми ещё раз для новой калибровки` : 'Система рассчитает порог автоматически'}
-              </Text>
-            </View>
-          </TouchableOpacity>
+          {deviceConnected ? (
+            /* ── Sensor mode: one-tap peak capture ── */
+            <TouchableOpacity style={styles.instrBtn} onPress={handleCapturePeak} activeOpacity={0.75}>
+              <View style={[styles.instrDot, {
+                backgroundColor: calibrated ? PH.lime : PH.bgSoft,
+                borderColor: calibrated ? PH.lime : PH.hairStrong,
+              }]}>
+                <Text style={[styles.instrDotTxt, { color: calibrated ? PH.bg : PH.inkFaint }]}>
+                  {emgPct > 0 ? `${emgPct}%` : '▶'}
+                </Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.instrTitle}>
+                  {calibrated ? 'Пик захвачен ✓' : 'Сожми мышцу → Захватить пик'}
+                </Text>
+                <Text style={styles.instrSub}>
+                  {calibrated
+                    ? `Порог: ${thresholdPct}% · Нажми ещё раз для новой калибровки`
+                    : 'Достигни максимального усилия, потом нажми сюда'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ) : (
+            /* ── Touch fallback: press-and-hold ── */
+            <TouchableOpacity
+              style={styles.instrBtn}
+              onPressIn={() => setPressing(true)}
+              onPressOut={() => { setPressing(false); handleCapturePeak(); }}
+              activeOpacity={1}
+            >
+              <View style={[styles.instrDot, {
+                backgroundColor: pressing ? PH.lime : PH.bgSoft,
+                borderColor: pressing ? PH.lime : PH.hairStrong,
+              }]}>
+                <Text style={[styles.instrDotTxt, { color: pressing ? PH.bg : PH.inkFaint }]}>
+                  {pressing ? `${emgPct}%` : '▼'}
+                </Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.instrTitle}>
+                  {pressing ? 'Держи максимальное усилие...' : 'Зажми и держи'}
+                </Text>
+                <Text style={styles.instrSub}>
+                  {calibrated
+                    ? `Порог: ${thresholdPct}% · Нажми ещё раз для новой калибровки`
+                    : 'Система рассчитает порог автоматически'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          )}
         </Card>
 
         <View style={styles.btnWrap}>
