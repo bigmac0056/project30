@@ -120,19 +120,19 @@ export const ALL_ACHIEVEMENTS = [
  * @returns {Array} ALL_ACHIEVEMENTS with unlocked: bool and progressVal / progressPct
  */
 export function computeAchievements(progress, sessions = []) {
-  const streak = progress?.streak_days ?? 0;
-  const totalMinutes = (progress?.week_minutes ?? 0);  // rough proxy, fine for MVP
+  const streak       = progress?.streak_days  ?? 0;
+  const totalMinutes = progress?.total_minutes ?? 0;   // from /sessions/progress
   const totalSessions = sessions.length;
 
   // unique games played
   const uniqueGames = new Set(sessions.map(s => s.game));
   const gamesPlayed = uniqueGames.size;
 
-  // skill scores from progress
+  // API returns 0–1 floats; scale to 0–100 for achievement checks
   const skills = {
-    activation: progress?.skill_activation ?? 0,
-    precision:  progress?.skill_precision ?? 0,
-    control:    progress?.skill_control ?? 0,
+    activation: (progress?.activation_avg ?? 0) * 100,
+    precision:  (progress?.precision_avg  ?? 0) * 100,
+    control:    (progress?.dosing_avg     ?? 0) * 100,
   };
 
   const ctx = { streak, totalMinutes, totalSessions, gamesPlayed, skills };

@@ -16,10 +16,11 @@ import {
   Animated, Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Path, Rect } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
 import { PH, FONTS } from '../constants/theme';
 import GameCover from '../components/GameCover';
-import { PrimaryBtn, GhostBtn } from '../components/Buttons';
+import { PrimaryBtn } from '../components/Buttons';
+import { useSensor } from '../hooks/useSensor';
 
 const { width: W } = Dimensions.get('window');
 const DURATIONS = [5, 10, 15, 30, 40];
@@ -34,9 +35,11 @@ export default function GameStartModal({ navigation, route }) {
   const { game = 'Sparrow', route: gameRoute = 'GameSparrow', color = PH.lime } = route?.params ?? {};
   const info = GAME_INFO[game] ?? GAME_INFO.Sparrow;
 
+  const { deviceConnected, sensorData } = useSensor();
+
   const [selectedMin, setSelectedMin] = useState(10);
-  const [emgPct, setEmgPct] = useState(0);
-  const [pulsed, setPulsed] = useState(false);   // user has tested EMG at least once
+  const [emgPct, setEmgPct]     = useState(0);
+  const [pulsed, setPulsed]     = useState(false);
   const [pressing, setPressing] = useState(false);
 
   const emgRef    = useRef(0);
@@ -44,26 +47,35 @@ export default function GameStartModal({ navigation, route }) {
   const barAnim   = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
-  // EMG rise/fall simulation on press
+  // ── Live sensor → EMG bar ────────────────────────────────
   useEffect(() => {
+    if (!deviceConnected || !sensorData) return;
+    const norm = Math.max(0, Math.min(1, sensorData.norm ?? 0));
+    emgRef.current = norm;
+    const pct = Math.round(norm * 100);
+    setEmgPct(pct);
+    Animated.timing(barAnim, { toValue: norm, duration: 60, useNativeDriver: false }).start();
+    if (norm > 0.6 && !pulsed) setPulsed(true);
+  }, [sensorData, deviceConnected]);
+
+  // ── Touch simulation (fallback when no device) ───────────
+  useEffect(() => {
+    if (deviceConnected) return;
     let timer;
     const step = () => {
-      if (pressRef.current) {
-        emgRef.current = Math.min(emgRef.current + 0.07, 1);
-      } else {
-        emgRef.current = Math.max(emgRef.current - 0.055, 0);
-      }
+      if (pressRef.current) emgRef.current = Math.min(emgRef.current + 0.07, 1);
+      else                  emgRef.current = Math.max(emgRef.current - 0.055, 0);
       const pct = Math.round(emgRef.current * 100);
       setEmgPct(pct);
       Animated.timing(barAnim, { toValue: emgRef.current, duration: 60, useNativeDriver: false }).start();
       if (pressRef.current || emgRef.current > 0) timer = setTimeout(step, 28);
     };
     if (pressing) { pressRef.current = true; step(); }
-    else { pressRef.current = false; step(); }
+    else          { pressRef.current = false; step(); }
     return () => clearTimeout(timer);
-  }, [pressing]);
+  }, [pressing, deviceConnected]);
 
-  // Pulse ring animation when user squeezes
+  // ── Pulse ring on strong signal ──────────────────────────
   useEffect(() => {
     if (emgPct > 60) {
       if (!pulsed) setPulsed(true);
@@ -75,7 +87,7 @@ export default function GameStartModal({ navigation, route }) {
   }, [emgPct]);
 
   const barWidth = barAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
-  const barColor = emgPct > 70 ? '#A8CC5C' : emgPct > 35 ? '#F4B850' : '#DDD';
+  const barColor = emgPct > 70 ? '#A8CC5C' : emgPct > 35 ? '#F4B850' : PH.bgSoft;
 
   const handleStart = () => {
     navigation.replace(gameRoute, { durationMin: selectedMin });
@@ -106,40 +118,60 @@ export default function GameStartModal({ navigation, route }) {
         </View>
       </View>
 
-      {/* ── Step 1: EMG check ─────────────────────────────── */}
+      {/* ── Step 1: EMG / device check ────────────────────── */}
       <View style={s.section}>
         <View style={s.stepRow}>
           <View style={[s.stepDot, pulsed && s.stepDotDone]}>
             <Text style={[s.stepNum, pulsed && { color: '#FFF' }]}>{pulsed ? '✓' : '1'}</Text>
           </View>
           <Text style={s.stepTitle}>Проверь сигнал мышцы</Text>
+          {/* Device status badge */}
+          <View style={[s.deviceBadge, { backgroundColor: deviceConnected ? '#EDF7E3' : PH.bgSoft, borderColor: deviceConnected ? `${PH.lime}55` : PH.hair }]}>
+            <View style={[s.deviceDot, { backgroundColor: deviceConnected ? PH.limeBright : PH.inkFaint }]} />
+            <Text style={[s.deviceTxt, { color: deviceConnected ? PH.lime : PH.inkFaint }]}>
+              {deviceConnected ? 'Датчик' : 'Симуляция'}
+            </Text>
+          </View>
         </View>
 
         <View style={s.emgCard}>
-          {/* Pulse circle */}
-          <View style={s.circleWrap}>
-            <Animated.View style={[s.pulsRing, { borderColor: color, transform: [{ scale: pulseAnim }] }]} />
-            <TouchableOpacity
-              style={[s.pressCircle, { backgroundColor: pressing ? color : 'transparent', borderColor: color }]}
-              onPressIn={() => setPressing(true)}
-              onPressOut={() => setPressing(false)}
-              activeOpacity={1}
-            >
-              <Text style={[s.pressLabel, { color: pressing ? PH.bg : color }]}>
-                {pressing ? `${emgPct}%` : 'ЖМИ'}
+          {deviceConnected ? (
+            /* ── Sensor mode: live bar, no button needed ── */
+            <View style={s.sensorLive}>
+              <Text style={s.sensorLiveEmoji}>💪</Text>
+              <Text style={[s.sensorLivePct, { color }]}>{emgPct}%</Text>
+              <Text style={s.sensorLiveHint}>
+                {pulsed ? '✓ Сигнал есть — можно начинать!' : 'Сожми мышцу чтобы проверить сигнал'}
               </Text>
-            </TouchableOpacity>
-          </View>
+            </View>
+          ) : (
+            /* ── Touch fallback: press circle ── */
+            <View style={s.circleWrap}>
+              <Animated.View style={[s.pulsRing, { borderColor: color, transform: [{ scale: pulseAnim }] }]} />
+              <TouchableOpacity
+                style={[s.pressCircle, { backgroundColor: pressing ? color : 'transparent', borderColor: color }]}
+                onPressIn={() => setPressing(true)}
+                onPressOut={() => setPressing(false)}
+                activeOpacity={1}
+              >
+                <Text style={[s.pressLabel, { color: pressing ? PH.bg : color }]}>
+                  {pressing ? `${emgPct}%` : 'ЖМИ'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
-          {/* Bar */}
+          {/* Bar — always shown */}
           <View style={s.emgBarWrap}>
             <Animated.View style={[s.emgBarFill, { width: barWidth, backgroundColor: barColor }]} />
             <View style={s.emgBarThresh} />
           </View>
           <Text style={s.emgHint}>
             {pulsed
-              ? `✓ Сигнал detected · ${emgPct}% пикового значения`
-              : 'Сожми и подержи — убедись, что сигнал отвечает'}
+              ? `✓ Сигнал подтверждён · ${emgPct}%`
+              : deviceConnected
+                ? 'Сожми мышцу — убедись что полоска двигается'
+                : 'Зажми кнопку — убедись что сигнал отвечает'}
           </Text>
         </View>
       </View>
@@ -270,4 +302,19 @@ const s = StyleSheet.create({
     fontFamily: FONTS.sans, fontSize: 11, color: PH.inkFaint,
     textAlign: 'center', marginTop: 4,
   },
+
+  // Device badge in step header
+  deviceBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999,
+    borderWidth: 1, marginLeft: 'auto',
+  },
+  deviceDot: { width: 6, height: 6, borderRadius: 3 },
+  deviceTxt: { fontFamily: FONTS.mono, fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
+
+  // Live sensor display
+  sensorLive: { alignItems: 'center', gap: 4, paddingVertical: 8 },
+  sensorLiveEmoji: { fontSize: 32 },
+  sensorLivePct: { fontFamily: FONTS.sansBold, fontSize: 36, letterSpacing: -1, lineHeight: 40 },
+  sensorLiveHint: { fontFamily: FONTS.sans, fontSize: 12, color: PH.inkDim, textAlign: 'center' },
 });

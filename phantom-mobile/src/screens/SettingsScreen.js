@@ -12,6 +12,7 @@ import { GhostBtn, PrimaryBtn } from '../components/Buttons';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import { useNotifications } from '../hooks/useNotifications';
+import { useSensor } from '../hooks/useSensor';
 import AchievementsCard from '../components/AchievementsCard';
 import { computeAchievements } from '../utils/achievements';
 
@@ -53,6 +54,7 @@ function DifficultyToggle({ value, onChange }) {
 export default function SettingsScreen({ navigation }) {
   const { user, logout, updateUser } = useAuth();
   const { scheduleReminder, cancelReminder } = useNotifications();
+  const { deviceConnected } = useSensor();
   const [sound, setSound] = useState(true);
   const [reminders, setReminders] = useState(true);
   const [difficulty, setDifficulty] = useState('beginner');
@@ -179,16 +181,18 @@ export default function SettingsScreen({ navigation }) {
         {/* Sensor */}
         <Card raised style={s.sensorCard}>
           <View style={s.sensorRow}>
-            <View style={s.sensorDot} />
+            <View style={[s.sensorDot, { backgroundColor: deviceConnected ? PH.limeBright : PH.coral }]} />
             <View style={{ flex: 1 }}>
               <Text style={s.sensorName}>Phantom Sensor</Text>
-              <Text style={s.sensorMeta}>Симуляция · нажми на экран в игре</Text>
+              <Text style={s.sensorMeta}>
+                {deviceConnected ? '● Датчик подключён · Живой сигнал' : '○ Не подключён · Режим симуляции'}
+              </Text>
             </View>
             <GhostBtn
               style={s.calibBtn}
               onPress={() => navigation.navigate('Calibration')}
             >
-              Откалибровать
+              Калибровка
             </GhostBtn>
           </View>
         </Card>
