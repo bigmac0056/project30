@@ -1,62 +1,89 @@
-// ─────────────────────────────────────────────
-// Phantom Rehab — Arduino Sensor Sketch
-// Reads analog sensor (ECG / force / EMG)
-// Sends JSON over Serial at 50 Hz
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────
+// Phantom Rehab — Arduino Sketch for AD8232 ECG/EMG module
+//
+// Wiring:
+//   AD8232 GND    → Arduino GND
+//   AD8232 3.3V   → Arduino 3.3V
+//   AD8232 OUTPUT → Arduino A0
+//   AD8232 LO-    → Arduino D11
+//   AD8232 LO+    → Arduino D10
+//   AD8232 SDN    → Arduino D9
+//
+// Output: JSON over Serial at 9600 baud, 50 Hz
+//   {"ecg":512,"norm":0.5005,"v":2.500,"ms":4230,"lo":0}
+//   lo=0 → electrodes OK
+//   lo=1 → electrodes detached (leads-off detected)
+// ─────────────────────────────────────────────────────────
 
-const int SENSOR_PIN   = A0;      // Main analog sensor
-const int SAMPLE_MS    = 20;      // 50 Hz sampling rate
-const int BAUD_RATE    = 9600;
+const int PIN_OUTPUT = A0;   // AD8232 analog signal
+const int PIN_LO_P  = 10;   // LO+ leads-off detect
+const int PIN_LO_N  = 11;   // LO- leads-off detect
+const int PIN_SDN   = 9;    // Shutdown (HIGH = module ON)
 
+const int   SAMPLE_MS = 20;  // 50 Hz
+const int   BAUD_RATE = 9600;
+
+// EMG envelope — smoothed peak for norm calculation
+// Adjust ALPHA for more/less smoothing (0.0–1.0)
+const float ALPHA      = 0.05f;   // low = very smooth
+const float ALPHA_FALL = 0.01f;   // peak envelope decay
+
+float envelope = 0.0f;
 unsigned long lastSample = 0;
 
 void setup() {
   Serial.begin(BAUD_RATE);
-  // Wait until serial port is ready (needed on Leonardo / Micro)
   while (!Serial) {}
-  // Brief pause so the bridge has time to open the port
-  delay(500);
+
+  pinMode(PIN_LO_P, INPUT);
+  pinMode(PIN_LO_N, INPUT);
+  pinMode(PIN_SDN,  OUTPUT);
+
+  digitalWrite(PIN_SDN, HIGH);  // Wake up AD8232 (active HIGH)
+
+  delay(500);  // Let AD8232 settle
 }
 
 void loop() {
   unsigned long now = millis();
+  if (now - lastSample < SAMPLE_MS) return;
+  lastSample = now;
 
-  if (now - lastSample >= SAMPLE_MS) {
-    lastSample = now;
+  // ── Leads-off detection ───────────────────────────────
+  bool leadsOff = (digitalRead(PIN_LO_P) == HIGH) ||
+                  (digitalRead(PIN_LO_N) == HIGH);
 
-    // Read raw ADC value (0–1023 on 5V Uno)
-    int   raw     = analogRead(SENSOR_PIN);
-    // Normalise to 0.0–1.0
-    float norm    = (float)raw / 1023.0f;
-    // Voltage (assuming 5 V reference)
-    float voltage = norm * 5.0f;
-
-    // ── JSON output ────────────────────────────
-    // Keep it compact — bridge parses every line
-    Serial.print(F("{\"ecg\":"));
-    Serial.print(raw);
-    Serial.print(F(",\"norm\":"));
-    Serial.print(norm, 4);
-    Serial.print(F(",\"v\":"));
-    Serial.print(voltage, 3);
-    Serial.print(F(",\"ms\":"));
-    Serial.print(now);
-    Serial.println(F("}"));
+  if (leadsOff) {
+    // Electrodes detached — send zeroed packet with lo=1
+    Serial.println(F("{\"ecg\":0,\"norm\":0.0000,\"v\":0.000,\"ms\":0,\"lo\":1}"));
+    envelope = 0.0f;
+    return;
   }
-}
 
-// ─────────────────────────────────────────────
-// MULTI-SENSOR EXAMPLE (uncomment if you have
-// a second sensor on A1, e.g. accelerometer Z)
-// ─────────────────────────────────────────────
-//
-// void loop() {
-//   if (millis() - lastSample >= SAMPLE_MS) {
-//     lastSample = millis();
-//     int ecg = analogRead(A0);
-//     int acc = analogRead(A1);
-//     Serial.print(F("{\"ecg\":"));  Serial.print(ecg);
-//     Serial.print(F(",\"acc\":"));  Serial.print(acc);
-//     Serial.println(F("}"));
-//   }
-// }
+  // ── Read AD8232 output ────────────────────────────────
+  int   raw     = analogRead(PIN_OUTPUT);        // 0–1023
+  float voltage = raw * (5.0f / 1023.0f);        // 0–5 V
+
+  // ── EMG envelope (peak-hold with slow decay) ──────────
+  // Gives a stable 0–1 "effort" value the games can use
+  float centred = abs(raw - 512);               // distance from midpoint
+  float instant = centred / 511.0f;             // 0.0–1.0 raw effort
+
+  if (instant > envelope)
+    envelope = envelope * (1.0f - ALPHA) + instant * ALPHA;
+  else
+    envelope *= (1.0f - ALPHA_FALL);            // slow decay
+
+  envelope = constrain(envelope, 0.0f, 1.0f);
+
+  // ── JSON output ───────────────────────────────────────
+  Serial.print(F("{\"ecg\":"));
+  Serial.print(raw);
+  Serial.print(F(",\"norm\":"));
+  Serial.print(envelope, 4);
+  Serial.print(F(",\"v\":"));
+  Serial.print(voltage, 3);
+  Serial.print(F(",\"ms\":"));
+  Serial.print(now);
+  Serial.println(F(",\"lo\":0}"));
+}
