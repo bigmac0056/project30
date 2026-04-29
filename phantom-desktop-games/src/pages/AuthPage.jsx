@@ -36,18 +36,18 @@ export default function AuthPage() {
   return (
     <div style={css.root}>
       {/* Brand */}
-      <div style={css.brand}>
+      <div style={css.brand} className="anim-fade-in">
         Phantom<span style={{ color: PH.lime }}>.</span>
       </div>
-      <div style={css.brandSub}>EMG Тренажёр · Desktop</div>
+      <div style={css.brandSub} className="anim-fade-in">EMG Тренажёр · Desktop</div>
 
       {/* Card */}
-      <form onSubmit={handleSubmit} style={css.card}>
+      <form onSubmit={handleSubmit} style={css.card} className="anim-pop-in">
         <div style={css.tabs}>
-          <button type="button" style={{ ...css.tab, ...(mode === 'login' ? css.tabActive : {}) }} onClick={() => { setMode('login'); setError(''); }}>
+          <button type="button" className="btn-tab" style={{ ...css.tab, ...(mode === 'login' ? css.tabActive : {}) }} onClick={() => { setMode('login'); setError(''); }}>
             Войти
           </button>
-          <button type="button" style={{ ...css.tab, ...(mode === 'register' ? css.tabActive : {}) }} onClick={() => { setMode('register'); setError(''); }}>
+          <button type="button" className="btn-tab" style={{ ...css.tab, ...(mode === 'register' ? css.tabActive : {}) }} onClick={() => { setMode('register'); setError(''); }}>
             Регистрация
           </button>
         </div>
@@ -55,28 +55,28 @@ export default function AuthPage() {
         {mode === 'register' && (
           <div style={css.field}>
             <label style={css.label}>ИМЯ</label>
-            <input style={css.input} type="text" placeholder="Ваше имя" value={name} onChange={e => setName(e.target.value)} required />
+            <input className="ph-input" style={css.input} type="text" placeholder="Ваше имя" value={name} onChange={e => setName(e.target.value)} required />
           </div>
         )}
 
         <div style={css.field}>
           <label style={css.label}>EMAIL</label>
-          <input style={css.input} type="email" placeholder="name@example.com" value={email} onChange={e => setEmail(e.target.value)} required />
+          <input className="ph-input" style={css.input} type="email" placeholder="name@example.com" value={email} onChange={e => setEmail(e.target.value)} required />
         </div>
 
         <div style={css.field}>
           <label style={css.label}>ПАРОЛЬ</label>
-          <input style={css.input} type="password" placeholder="••••••••" value={pass} onChange={e => setPass(e.target.value)} required minLength={6} />
+          <input className="ph-input" style={css.input} type="password" placeholder="••••••••" value={pass} onChange={e => setPass(e.target.value)} required minLength={6} />
         </div>
 
         {error && <div style={css.error}>{error}</div>}
 
-        <button type="submit" style={{ ...css.submit, opacity: busy ? 0.7 : 1 }} disabled={busy}>
+        <button type="submit" className="btn-primary" style={{ ...css.submit, opacity: busy ? 0.7 : 1 }} disabled={busy}>
           {busy ? '...' : mode === 'login' ? 'Войти →' : 'Создать аккаунт →'}
         </button>
       </form>
 
-      <div style={css.footer}>
+      <div style={css.footer} className="anim-fade-in">
         Данные синхронизируются с мобильным приложением
       </div>
     </div>

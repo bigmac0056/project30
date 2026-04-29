@@ -149,14 +149,14 @@ export default function ReportPage({ onBack }) {
   );
 
   return (
-    <div style={css.root}>
+    <div style={css.root} className="page-enter">
       {/* toolbar */}
       <div style={css.toolbar} className="no-print">
-        <button style={css.backBtn} onClick={onBack}>← Назад</button>
+        <button className="btn-ghost" style={css.backBtn} onClick={onBack}>← Назад</button>
         <span style={{ fontFamily: PH.fontMono, fontSize: 10, color: PH.inkFaint, letterSpacing: '0.1em' }}>
           КЛИНИЧЕСКИЙ ОТЧЁТ ЭМГ · ПРЕДПРОСМОТР A4
         </span>
-        <button style={css.printBtn} onClick={() => window.print()}>
+        <button className="btn-primary btn-print" style={css.printBtn} onClick={() => window.print()}>
           📄 Скачать PDF / Напечатать
         </button>
       </div>

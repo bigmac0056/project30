@@ -65,25 +65,27 @@ function AppInner() {
   if (screen === 'report')   return <ReportPage   onBack={() => setScreen('progress')} />;
 
   return (
-    <div style={css.root}>
+    <div style={css.root} className="page-enter">
       {/* Brand */}
-      <div style={css.header}>
+      <div style={css.header} className="anim-fade-in">
         <span style={css.brand}>Phantom<span style={{ color: PH.lime }}>.</span></span>
         <span style={css.brandSub}>EMG Тренажёр · Desktop</span>
       </div>
 
       {/* User bar */}
-      <div style={css.userBar}>
+      <div style={css.userBar} className="nav-pill anim-fade-in">
         <span style={{ fontFamily: PH.fontMono, fontSize: 11, color: PH.inkDim }}>👤 {user.name}</span>
-        <button style={css.progressBtn} onClick={() => setScreen('progress')}>📊 Прогресс</button>
-        <button style={css.reportNavBtn} onClick={() => setScreen('report')}>📄 Отчёт</button>
-        <button style={css.logoutBtn} onClick={logout}>Выйти</button>
+        <button className="btn-secondary" style={css.progressBtn} onClick={() => setScreen('progress')}>📊 Прогресс</button>
+        <button className="btn-primary"   style={css.reportNavBtn} onClick={() => setScreen('report')}>📄 Отчёт</button>
+        <button className="btn-ghost"     style={css.logoutBtn} onClick={logout}>Выйти</button>
       </div>
 
       {/* Sensor status bar */}
-      <div style={{ ...css.sensorBar, borderColor: deviceConnected ? `${PH.lime}55` : wsConnected ? `${PH.coral}33` : PH.hair }}>
-        <span style={{ ...css.sensorBarDot, background: deviceConnected ? PH.limeBright : wsConnected ? PH.coral : PH.inkFaint,
-          boxShadow: deviceConnected ? `0 0 8px ${PH.limeBright}` : 'none' }} />
+      <div className="sensor-bar anim-fade-in" style={{ ...css.sensorBar, borderColor: deviceConnected ? `${PH.lime}55` : wsConnected ? `${PH.coral}33` : PH.hair }}>
+        <span
+          className={deviceConnected ? 'dot-connected' : wsConnected ? 'dot-warning' : ''}
+          style={{ ...css.sensorBarDot, background: deviceConnected ? PH.limeBright : wsConnected ? PH.coral : PH.inkFaint }}
+        />
         <span style={{ fontFamily: PH.fontMono, fontSize: 11, letterSpacing: '0.08em', color: PH.inkDim }}>
           {deviceConnected ? 'Arduino подключён · Режим датчика активен'
             : wsConnected ? 'Бэкенд доступен · Arduino не найден — подключи датчик'
@@ -91,7 +93,7 @@ function AppInner() {
         </span>
       </div>
 
-      <p style={css.intro}>
+      <p style={css.intro} className="anim-fade-in">
         Три игры — три навыка для управления бионическим протезом.<br />
         <span style={css.hint}>
           {deviceConnected
@@ -102,20 +104,24 @@ function AppInner() {
 
       <div style={css.grid}>
         {GAMES.map(g => (
-          <button key={g.id} style={{ ...css.card, background: g.bg, borderColor: `${g.color}33` }}
-            onClick={() => setScreen(g.id)}>
+          <button
+            key={g.id}
+            className="game-card anim-pop-in"
+            style={{ ...css.card, background: g.bg, borderColor: `${g.color}33` }}
+            onClick={() => setScreen(g.id)}
+          >
             <div style={{ ...css.cardDot, background: g.color }} />
             <div style={css.cardName}>{g.name}</div>
             <div style={css.cardSub}>{g.sub}</div>
             <div style={{ ...css.cardSkill, color: g.color, background: `${g.color}18`, borderColor: `${g.color}33` }}>
               ● {g.skill}
             </div>
-            <div style={{ ...css.playBtn, background: g.color }}>Играть →</div>
+            <div className="btn-primary" style={{ ...css.playBtn, background: g.color }}>Играть →</div>
           </button>
         ))}
       </div>
 
-      <div style={css.footer}>
+      <div style={css.footer} className="anim-fade-in">
         <span style={css.footerTxt}>Phantom EMG · v0.5</span>
       </div>
     </div>

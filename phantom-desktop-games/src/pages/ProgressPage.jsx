@@ -90,11 +90,11 @@ export default function ProgressPage({ onBack, onReport }) {
   ] : [];
 
   return (
-    <div style={css.root}>
+    <div style={css.root} className="page-enter">
       <div style={css.topBar}>
-        <button style={css.backBtn} onClick={onBack}>← Назад</button>
+        <button className="btn-ghost" style={css.backBtn} onClick={onBack}>← Назад</button>
         <span style={{ fontFamily: PH.fontSans, fontSize: 15, fontWeight: 700, color: PH.ink }}>Прогресс</span>
-        <button style={css.reportBtn} onClick={onReport}>📄 Отчёт для врача</button>
+        <button className="btn-primary btn-print" style={css.reportBtn} onClick={onReport}>📄 Отчёт для врача</button>
       </div>
 
       {loading ? (
@@ -111,7 +111,7 @@ export default function ProgressPage({ onBack, onReport }) {
               { label: 'За неделю',     value: progress?.week_minutes    ?? 0, unit: ' мин' },
               { label: 'Серия',         value: progress?.streak_days     ?? 0, unit: ' дн' },
             ].map(s => (
-              <div key={s.label} style={css.statCard}>
+              <div key={s.label} className="stat-card anim-pop-in" style={css.statCard}>
                 <div style={css.statCardLabel}>{s.label}</div>
                 <div style={css.statCardValue}>{s.value}{s.unit}</div>
               </div>

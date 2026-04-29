@@ -229,6 +229,7 @@ export default function GameSparrow({ onBack }) {
           {DURATIONS.map(d => (
             <button
               key={d}
+              className={`dur-btn${duration === d ? ' dur-btn-active' : ''}`}
               style={{ ...css.durBtn, ...(duration === d ? css.durBtnActive : {}) }}
               onClick={() => setDuration(d)}
             >
