@@ -109,7 +109,13 @@ export default function GameSteadyClimb({ onBack }) {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    canvas.width = W; canvas.height = H;
+    // Fix blurry canvas on HiDPI/retina screens
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width  = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width  = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.scale(dpr, dpr);
 
     const tick = (time) => {
       const st = stateRef.current;
