@@ -39,14 +39,11 @@ export default function GameSteadyClimbScreen({ navigation, route }) {
   const [meters,   setMeters]   = useState(0);
   const [phase,    setPhase]    = useState('idle');
   const [timeLeft, setTimeLeft] = useState(totalSec);
-  const [devicePaused, setDevicePaused] = useState(false);
-
   const emgRef       = useRef(0);
   const scoreRef     = useRef(0);
   const holdRef      = useRef(0);
   const metersRef    = useRef(0);
   const frameRef     = useRef(null);
-  const pressing     = useRef(false);
   const phaseRef     = useRef('idle');
   const startTimeRef = useRef(null);
   const emgPeakRef   = useRef(0);
@@ -55,11 +52,19 @@ export default function GameSteadyClimbScreen({ navigation, route }) {
 
   const setPhaseS = (p) => { phaseRef.current = p; setPhase(p); };
 
-  const { wsConnected, deviceConnected, sensorData } = useSensor();
+  const { deviceConnected, sensorData } = useSensor();
 
-  // Live sensor → emgRef
+  // Live sensor (only input source) → emgRef
   useEffect(() => {
-    if (!deviceConnected || !sensorData) return;
+    if (!deviceConnected || !sensorData) {
+      emgRef.current = 0; setEmgLevel(0);
+      if (phaseRef.current === 'playing') setPhaseS('paused');
+      return;
+    }
+    if (phaseRef.current === 'paused') {
+      lastSecRef.current = null;
+      setPhaseS('playing');
+    }
     const norm = Math.max(0, Math.min(1, sensorData.norm ?? 0));
     emgRef.current = norm;
     setEmgLevel(norm);
@@ -70,21 +75,6 @@ export default function GameSteadyClimbScreen({ navigation, route }) {
     }
   }, [sensorData, deviceConnected]);
 
-  // Device connect / disconnect overlay
-  useEffect(() => {
-    if (!wsConnected) return;
-    if (!deviceConnected) {
-      setDevicePaused(true);
-      if (phaseRef.current === 'playing') setPhaseS('paused');
-    } else {
-      setDevicePaused(false);
-      if (phaseRef.current === 'paused') {
-        lastSecRef.current = null;
-        setPhaseS('playing');
-      }
-    }
-  }, [deviceConnected, wsConnected]);
-
   const reset = useCallback(() => {
     emgRef.current = 0;       setEmgLevel(0);
     scoreRef.current = 0;     setScore(0);
@@ -92,7 +82,7 @@ export default function GameSteadyClimbScreen({ navigation, route }) {
     metersRef.current = 0;    setMeters(0);
     startTimeRef.current = null; emgPeakRef.current = 0;
     timeLeftRef.current = totalSec; setTimeLeft(totalSec);
-    lastSecRef.current = null; setDevicePaused(false);
+    lastSecRef.current = null;
     setPhaseS('idle');
   }, [totalSec]);
 
@@ -155,32 +145,6 @@ export default function GameSteadyClimbScreen({ navigation, route }) {
 
   const handleFinish = () => {
     setPhaseS('done');
-  };
-
-  const handlePressIn = () => {
-    pressing.current = true;
-    if (phaseRef.current === 'idle') {
-      startTimeRef.current = Date.now();
-      lastSecRef.current = null;
-      setPhaseS('playing');
-    }
-    const rise = () => {
-      if (!pressing.current) return;
-      emgRef.current = Math.min(emgRef.current + 0.04, 1);
-      setEmgLevel(emgRef.current);
-      setTimeout(rise, 28);
-    };
-    rise();
-  };
-  const handlePressOut = () => {
-    pressing.current = false;
-    const fall = () => {
-      if (pressing.current) return;
-      emgRef.current = Math.max(emgRef.current - 0.035, 0);
-      setEmgLevel(emgRef.current);
-      if (emgRef.current > 0) setTimeout(fall, 28);
-    };
-    fall();
   };
 
   const inZone       = emgLevel >= TARGET_MIN && emgLevel <= TARGET_MAX;
@@ -284,14 +248,10 @@ export default function GameSteadyClimbScreen({ navigation, route }) {
         </View>
       </View>
 
-      {!deviceConnected && (
-        <TouchableOpacity style={s.touch} onPressIn={handlePressIn} onPressOut={handlePressOut} activeOpacity={1} />
-      )}
-
-      {phase === 'idle' && (
+      {phase === 'idle' && deviceConnected && (
         <View style={s.hint}>
           <View style={[s.hintDot, { backgroundColor: PH.coral }]} />
-          <Text style={s.hintText}>{deviceConnected ? 'Удерживай сжатие в зелёной зоне' : 'Зажми так, чтобы попасть в зелёную зону'}</Text>
+          <Text style={s.hintText}>Удерживай сжатие в зелёной зоне</Text>
         </View>
       )}
 
@@ -302,12 +262,15 @@ export default function GameSteadyClimbScreen({ navigation, route }) {
         </TouchableOpacity>
       )}
 
-      {/* Device disconnect overlay */}
-      {devicePaused && (
+      {/* Device not connected — always blocks game */}
+      {!deviceConnected && (
         <View style={s.overlay}>
-          <Text style={s.ovEmoji}>🔌</Text>
-          <Text style={s.ovTitle}>Устройство отключено</Text>
-          <Text style={s.ovSub}>Подключи датчик и игра продолжится</Text>
+          <Text style={s.ovEmoji}>🦾</Text>
+          <Text style={s.ovTitle}>Подключи EMG датчик</Text>
+          <Text style={s.ovSub}>Игра управляется только через датчик мышц.{'\n'}Подключи Arduino — игра стартует сама.</Text>
+          <TouchableOpacity style={s.ovBack} onPress={() => navigation.goBack()}>
+            <Text style={s.ovBackTxt}>← Назад</Text>
+          </TouchableOpacity>
         </View>
       )}
     </View>
@@ -340,7 +303,6 @@ const s = StyleSheet.create({
   bottomStats: { alignItems: 'flex-end' },
   statLbl: { fontFamily: FONTS.mono, fontSize: 9, color: PH.inkFaint, letterSpacing: 1 },
   statVal: { fontFamily: FONTS.sansBold, fontSize: 20, lineHeight: 22 },
-  touch: { position: 'absolute', top: 100, left: 0, right: 96, bottom: 110, zIndex: 5 },
   hint: { position: 'absolute', bottom: 130, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 999, borderWidth: 1, borderColor: PH.hair, zIndex: 8 },
   hintDot: { width: 6, height: 6, borderRadius: 3 },
   hintText: { fontFamily: FONTS.sans, fontSize: 12, color: PH.ink },
@@ -350,4 +312,6 @@ const s = StyleSheet.create({
   ovEmoji: { fontSize: 44 },
   ovTitle: { fontFamily: FONTS.sansBold, fontSize: 22, color: PH.ink, letterSpacing: -0.5 },
   ovSub: { fontFamily: FONTS.sans, fontSize: 14, color: PH.inkDim, textAlign: 'center', paddingHorizontal: 40, lineHeight: 21 },
+  ovBack: { marginTop: 16, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 999, borderWidth: 1, borderColor: PH.hairStrong, backgroundColor: PH.bgSoft },
+  ovBackTxt: { fontFamily: FONTS.sansMedium, fontSize: 14, color: PH.ink },
 });

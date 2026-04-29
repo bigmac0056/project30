@@ -21,8 +21,8 @@ export default function GameSteadyClimb({ onBack }) {
   const canvasRef = useRef(null);
   const stateRef = useRef({
     emg: 0, score: 0, hold: 0, meters: 0,
-    phase: 'idle', pressing: false, lastTime: null,
-    climberProgress: 0, sensorActive: false,
+    phase: 'idle', lastTime: null,
+    climberProgress: 0,
   });
   const [ui, setUi] = useState({ score: 0, hold: 0, meters: 0, emg: 0, phase: 'idle', inZone: false });
   const rafRef = useRef(null);
@@ -35,31 +35,16 @@ export default function GameSteadyClimb({ onBack }) {
     setUi({ score: 0, hold: 0, meters: 0, emg: 0, phase: 'idle', inZone: false });
   };
 
-  // Live sensor → stateRef.current.emg
+  // Live sensor (only input source) → stateRef.current.emg
   useEffect(() => {
-    stateRef.current.sensorActive = deviceConnected;
-    if (!deviceConnected || !sensorData) return;
+    if (!deviceConnected || !sensorData) {
+      stateRef.current.emg = 0;
+      return;
+    }
     const norm = Math.max(0, Math.min(1, sensorData.norm ?? 0));
     stateRef.current.emg = norm;
     if (norm > 0.15 && stateRef.current.phase === 'idle') setPhase('playing');
   }, [sensorData, deviceConnected]);
-
-  useEffect(() => {
-    const onDown = (e) => {
-      if (e.code === 'Space') e.preventDefault();
-      if (e.code === 'Space' || e.button === 0) {
-        stateRef.current.pressing = true;
-        if (stateRef.current.phase === 'idle') setPhase('playing');
-      }
-    };
-    const onUp = (e) => { if (e.code === 'Space' || e.button === 0) stateRef.current.pressing = false; };
-    window.addEventListener('keydown', onDown); window.addEventListener('keyup', onUp);
-    window.addEventListener('mousedown', onDown); window.addEventListener('mouseup', onUp);
-    return () => {
-      window.removeEventListener('keydown', onDown); window.removeEventListener('keyup', onUp);
-      window.removeEventListener('mousedown', onDown); window.removeEventListener('mouseup', onUp);
-    };
-  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -71,17 +56,6 @@ export default function GameSteadyClimb({ onBack }) {
       if (!st.lastTime) st.lastTime = time;
       const dt = Math.min((time - st.lastTime) / 1000, 0.1); // in seconds
       st.lastTime = time;
-
-      // EMG rise/fall (keyboard/mouse fallback — skip when live sensor is active)
-      if (!st.sensorActive) {
-        if (st.pressing) st.emg = Math.min(st.emg + 0.035 / (1 / 60), 1);
-        else st.emg = Math.max(st.emg - 0.03 / (1 / 60), 0);
-      }
-
-      const rawDt = dt; // actual seconds
-      if (st.pressing) {
-        // Use real dt for game logic
-      }
 
       const inZone = st.emg >= TARGET_MIN && st.emg <= TARGET_MAX;
 
@@ -169,18 +143,26 @@ export default function GameSteadyClimb({ onBack }) {
             <span style={{ ...css.scoreVal, color: PH.coral }}>{meters}m</span>
           </div>
         </div>
-        <div style={{ ...css.sensorPill, borderColor: deviceConnected ? `${PH.coral}55` : PH.hair }}>
-          <span style={{ ...css.sensorDot, background: deviceConnected ? PH.coral : PH.inkFaint, boxShadow: deviceConnected ? `0 0 10px ${PH.coral}` : 'none' }} />
-          {deviceConnected ? 'SENSOR · LIVE' : 'SENSOR · SIM'}
+        <div style={{ ...css.sensorPill, borderColor: deviceConnected ? `${PH.coral}55` : `${PH.coral}55` }}>
+          <span style={{ ...css.sensorDot, background: deviceConnected ? PH.coral : PH.coral, boxShadow: deviceConnected ? `0 0 10px ${PH.coral}` : 'none' }} />
+          {deviceConnected ? 'ДАТЧИК · ПОДКЛЮЧЁН' : 'ДАТЧИК · НЕТ'}
         </div>
       </div>
 
-      {phase === 'idle' && (
+      {phase === 'idle' && deviceConnected && (
         <div style={css.hint}>
           <span style={{ ...css.hintDot, background: PH.coral, boxShadow: `0 0 8px ${PH.coral}` }} />
-          {deviceConnected
-            ? 'Удерживай сжатие в зелёной зоне — чем дольше, тем выше!'
-            : <>Зажми <kbd style={css.kbd}>ПРОБЕЛ</kbd> или <kbd style={css.kbd}>ЛКМ</kbd> плавно — удержи в зелёной зоне!</>}
+          Удерживай сжатие в зелёной зоне — чем дольше, тем выше!
+        </div>
+      )}
+
+      {/* Device not connected overlay */}
+      {!deviceConnected && (
+        <div style={css.overlay}>
+          <span style={{ fontSize: 56 }}>🦾</span>
+          <span style={css.ovTitle}>Подключи EMG датчик</span>
+          <span style={css.ovSub}>Игра управляется только через датчик мышц.<br />Подключи Arduino — игра стартует автоматически.</span>
+          <button style={{ ...css.ovBtn, background: PH.ink, marginTop: 8 }} onClick={onBack}>← Назад в меню</button>
         </div>
       )}
     </div>
@@ -417,8 +399,8 @@ const css = {
     display: 'flex', alignItems: 'center', gap: 8, zIndex: 8, whiteSpace: 'nowrap',
   },
   hintDot: { width: 8, height: 8, borderRadius: '50%', display: 'inline-block' },
-  kbd: {
-    background: PH.bgSoft, border: `1px solid ${PH.hairStrong}`,
-    borderRadius: 4, padding: '1px 7px', fontFamily: PH.fontMono, fontSize: 12, color: PH.ink,
-  },
+  overlay: { position: 'absolute', inset: 0, background: 'rgba(245,242,236,0.97)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, zIndex: 20 },
+  ovTitle: { fontFamily: PH.fontSans, fontSize: 32, fontWeight: 700, color: PH.ink, letterSpacing: '-0.03em' },
+  ovSub: { fontFamily: PH.fontSans, fontSize: 15, color: PH.inkDim, textAlign: 'center', lineHeight: 1.6, maxWidth: 400 },
+  ovBtn: { padding: '12px 28px', borderRadius: 12, border: 'none', cursor: 'pointer', fontFamily: PH.fontSans, fontSize: 16, fontWeight: 600, color: '#FFF' },
 };

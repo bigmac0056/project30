@@ -1,10 +1,8 @@
 /**
- * GameSparrowScreen — Ghost Mode + Timed + Live Sensor
- * ──────────────────────────────────────────────────────
- * EMG source priority:
- *   1. Live Arduino data via useSensor() when device is connected (50 Hz)
- *   2. Touch fallback (onPressIn/Out) when no device — for dev/demo
- * devicePaused overlay only appears when WS is up but Arduino unplugs mid-game.
+ * GameSparrowScreen — Ghost Mode + Timed + Live EMG Sensor only
+ * ──────────────────────────────────────────────────────────────
+ * Input: Live Arduino via useSensor() exclusively.
+ * When device not connected → full-screen "connect device" overlay blocks gameplay.
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
@@ -62,7 +60,6 @@ export default function GameSparrowScreen({ navigation, route }) {
   const [phase,      setPhase]      = useState('idle');   // idle | playing | paused | done
   const [timeLeft,   setTimeLeft]   = useState(totalSec);
   const [birdHit,    setBirdHit]    = useState(false);    // flash state
-  const [devicePaused, setDevicePaused] = useState(false);
 
   // Refs (avoid stale closures in rAF loop)
   const emgRef        = useRef(0);
@@ -72,7 +69,6 @@ export default function GameSparrowScreen({ navigation, route }) {
   const scoreRef      = useRef(0);
   const comboRef      = useRef(0);
   const frameRef      = useRef(null);
-  const pressing      = useRef(false);
   const phaseRef      = useRef('idle');
   const startTimeRef  = useRef(null);
   const emgPeakRef    = useRef(0);
@@ -85,39 +81,28 @@ export default function GameSparrowScreen({ navigation, route }) {
 
   const setPhaseSync = (p) => { phaseRef.current = p; setPhase(p); };
 
-  // ── Live sensor ───────────────────────────────────────────
-  const { wsConnected, deviceConnected, sensorData } = useSensor();
+  // ── Live sensor (only input source) ──────────────────────
+  const { deviceConnected, sensorData } = useSensor();
 
-  // sensorData fires at ~50 Hz when Arduino is connected.
-  // Writes directly to emgRef so the rAF game loop picks it up every frame.
   useEffect(() => {
-    if (!deviceConnected || !sensorData) return;
+    if (!deviceConnected || !sensorData) {
+      emgRef.current = 0; setEmgLevel(0);
+      if (phaseRef.current === 'playing') setPhaseSync('paused');
+      return;
+    }
+    if (phaseRef.current === 'paused') {
+      lastSecRef.current = null;
+      setPhaseSync('playing');
+    }
     const norm = Math.max(0, Math.min(1, sensorData.norm ?? 0));
     emgRef.current = norm;
     setEmgLevel(norm);
-    // Auto-start: first significant squeeze starts the game
     if (norm > 0.15 && phaseRef.current === 'idle') {
       startTimeRef.current = Date.now();
       lastSecRef.current = null;
       setPhaseSync('playing');
     }
   }, [sensorData, deviceConnected]);
-
-  // Pause when Arduino unplugs mid-game; resume on reconnect.
-  // When WS is fully down (!wsConnected) → silent touch fallback, no overlay.
-  useEffect(() => {
-    if (!wsConnected) return;
-    if (!deviceConnected) {
-      setDevicePaused(true);
-      if (phaseRef.current === 'playing') setPhaseSync('paused');
-    } else {
-      setDevicePaused(false);
-      if (phaseRef.current === 'paused') {
-        lastSecRef.current = null; // reset timer ref so tick starts fresh
-        setPhaseSync('playing');
-      }
-    }
-  }, [deviceConnected, wsConnected]);
 
   // ── Flash animation on ghost hit ──────────────────────────
   const triggerHitFlash = () => {
@@ -145,7 +130,6 @@ export default function GameSparrowScreen({ navigation, route }) {
     lastSecRef.current = null;
     hitTimeRef.current = 0;
     setBirdHit(false);
-    setDevicePaused(false);
     setPhaseSync('idle');
   }, [totalSec]);
 
@@ -245,33 +229,6 @@ export default function GameSparrowScreen({ navigation, route }) {
     navigation.replace('Results', { score: finalScore, game: 'Sparrow', durationSec: dur, emgPeak: peak, emgAvg: avg });
   }, [phase]);
 
-  // ── EMG press handlers ────────────────────────────────────
-  const handlePressIn = () => {
-    pressing.current = true;
-    if (phaseRef.current === 'idle') {
-      startTimeRef.current = Date.now();
-      lastSecRef.current = null;
-      setPhaseSync('playing');
-    }
-    const rise = () => {
-      if (!pressing.current) return;
-      emgRef.current = Math.min(emgRef.current + 0.055, 1);
-      setEmgLevel(emgRef.current);
-      setTimeout(rise, 28);
-    };
-    rise();
-  };
-  const handlePressOut = () => {
-    pressing.current = false;
-    const fall = () => {
-      if (pressing.current) return;
-      emgRef.current = Math.max(emgRef.current - 0.048, 0);
-      setEmgLevel(emgRef.current);
-      if (emgRef.current > 0) setTimeout(fall, 28);
-    };
-    fall();
-  };
-
   // ── Timer colour ──────────────────────────────────────────
   const timerColor = timeLeft <= 30 ? PH.coral : timeLeft <= 60 ? '#F4B850' : PH.ink;
 
@@ -343,34 +300,23 @@ export default function GameSparrowScreen({ navigation, route }) {
         <Text style={s.emgVal}>{Math.round(emgLevel * 100)}%</Text>
       </View>
 
-      {/* Touch zone — only when no Arduino connected (fallback/demo mode) */}
-      {!deviceConnected && (
-        <TouchableOpacity
-          style={s.touch}
-          onPressIn={handlePressIn}
-          onPressOut={handlePressOut}
-          activeOpacity={1}
-        />
-      )}
-
       {/* Idle hint */}
-      {phase === 'idle' && (
+      {phase === 'idle' && deviceConnected && (
         <View style={s.hint}>
-          <View style={[s.hintDot, { backgroundColor: deviceConnected ? PH.limeBright : PH.lime }]} />
-          <Text style={s.hintText}>
-            {deviceConnected
-              ? 'Сожми мышцу — взлетай'
-              : 'Зажми экран — взлетай, отпусти — падай'}
-          </Text>
+          <View style={[s.hintDot, { backgroundColor: PH.limeBright }]} />
+          <Text style={s.hintText}>Сожми мышцу — птица взлетает</Text>
         </View>
       )}
 
-      {/* Device disconnect overlay */}
-      {devicePaused && (
+      {/* Device not connected — always blocks game */}
+      {!deviceConnected && (
         <View style={s.overlay}>
-          <Text style={s.ovEmoji}>🔌</Text>
-          <Text style={s.ovTitle}>Устройство отключено</Text>
-          <Text style={s.ovSub}>Подключи датчик и игра продолжится автоматически</Text>
+          <Text style={s.ovEmoji}>🦾</Text>
+          <Text style={s.ovTitle}>Подключи EMG датчик</Text>
+          <Text style={s.ovSub}>Игра управляется только через датчик мышц.{'\n'}Подключи Arduino — игра стартует сама.</Text>
+          <TouchableOpacity style={s.ovBack} onPress={() => navigation.goBack()}>
+            <Text style={s.ovBackTxt}>← Назад</Text>
+          </TouchableOpacity>
         </View>
       )}
     </View>
@@ -431,7 +377,6 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.88)', paddingHorizontal: 5,
     paddingVertical: 2, borderRadius: 999, fontVariant: ['tabular-nums'],
   },
-  touch: { position: 'absolute', top: 100, left: 60, right: 0, bottom: 80, zIndex: 5 },
   hint: {
     position: 'absolute', bottom: 32, alignSelf: 'center',
     flexDirection: 'row', alignItems: 'center', gap: 8,
@@ -452,4 +397,10 @@ const s = StyleSheet.create({
     fontFamily: FONTS.sans, fontSize: 14, color: PH.inkDim,
     textAlign: 'center', paddingHorizontal: 40, lineHeight: 21,
   },
+  ovBack: {
+    marginTop: 16, paddingHorizontal: 24, paddingVertical: 12,
+    borderRadius: 999, borderWidth: 1, borderColor: PH.hairStrong,
+    backgroundColor: PH.bgSoft,
+  },
+  ovBackTxt: { fontFamily: FONTS.sansMedium, fontSize: 14, color: PH.ink },
 });

@@ -4,29 +4,62 @@ import GameSparrow from './games/sparrow/GameSparrow';
 import GamePulseRun from './games/pulserun/GamePulseRun';
 import GameSteadyClimb from './games/steadyclimb/GameSteadyClimb';
 import { useSensor } from './hooks/useSensor';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import AuthPage from './pages/AuthPage';
+import { api } from './services/api';
 
 const GAMES = [
   {
     id: 'sparrow', name: 'Sparrow', sub: 'flappy · удержание',
     skill: 'Активация', color: PH.lime, bg: PH.limeSoft,
+    apiKey: 'Sparrow',
   },
   {
     id: 'pulse', name: 'Pulse Run', sub: 'раннер · импульс',
     skill: 'Точность', color: PH.violet, bg: PH.violetSoft,
+    apiKey: 'Pulse Run',
   },
   {
     id: 'climb', name: 'Steady Climb', sub: 'альпинист · дозирование',
     skill: 'Контроль', color: PH.coral, bg: '#FCE6DD',
+    apiKey: 'Steady Climb',
   },
 ];
 
-export default function App() {
+function AppInner() {
   const [activeGame, setActiveGame] = useState(null);
   const { wsConnected, deviceConnected } = useSensor();
+  const { user, loading, logout } = useAuth();
 
-  if (activeGame === 'sparrow') return <GameSparrow onBack={() => setActiveGame(null)} />;
-  if (activeGame === 'pulse')   return <GamePulseRun onBack={() => setActiveGame(null)} />;
-  if (activeGame === 'climb')   return <GameSteadyClimb onBack={() => setActiveGame(null)} />;
+  if (loading) {
+    return (
+      <div style={{ width: '100vw', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: PH.bg }}>
+        <span style={{ fontFamily: PH.fontMono, fontSize: 13, color: PH.inkFaint }}>Загрузка...</span>
+      </div>
+    );
+  }
+
+  if (!user) return <AuthPage />;
+
+  const handleGameEnd = async ({ score, game, durationSec, emgPeak, emgAvg }) => {
+    setActiveGame(null);
+    try {
+      await api.createSession({
+        game,
+        score,
+        duration_sec: durationSec,
+        emg_peak: emgPeak,
+        emg_avg: emgAvg,
+        activation_score: Math.min(100, Math.round(emgPeak * 100)),
+        precision_score:  Math.min(100, Math.round(score / 10)),
+        dosing_score:     Math.min(100, Math.round(emgAvg * 100)),
+      });
+    } catch { /* session save failure is silent */ }
+  };
+
+  if (activeGame === 'sparrow') return <GameSparrow onBack={(r) => r ? handleGameEnd({ ...r, game: 'Sparrow' }) : setActiveGame(null)} />;
+  if (activeGame === 'pulse')   return <GamePulseRun onBack={(r) => r ? handleGameEnd({ ...r, game: 'Pulse Run' }) : setActiveGame(null)} />;
+  if (activeGame === 'climb')   return <GameSteadyClimb onBack={(r) => r ? handleGameEnd({ ...r, game: 'Steady Climb' }) : setActiveGame(null)} />;
 
   return (
     <div style={css.root}>
@@ -36,14 +69,22 @@ export default function App() {
         <span style={css.brandSub}>EMG Тренажёр · Desktop</span>
       </div>
 
+      {/* User bar */}
+      <div style={css.userBar}>
+        <span style={{ fontFamily: PH.fontMono, fontSize: 11, color: PH.inkDim }}>
+          👤 {user.name}
+        </span>
+        <button style={css.logoutBtn} onClick={logout}>Выйти</button>
+      </div>
+
       {/* Sensor status bar */}
       <div style={{ ...css.sensorBar, borderColor: deviceConnected ? `${PH.lime}55` : wsConnected ? `${PH.coral}33` : PH.hair }}>
         <span style={{ ...css.sensorBarDot, background: deviceConnected ? PH.limeBright : wsConnected ? PH.coral : PH.inkFaint,
           boxShadow: deviceConnected ? `0 0 8px ${PH.limeBright}` : 'none' }} />
         <span style={{ fontFamily: PH.fontMono, fontSize: 11, letterSpacing: '0.08em', color: PH.inkDim }}>
           {deviceConnected ? 'Arduino подключён · Режим датчика активен'
-            : wsConnected ? 'Бэкенд доступен · Arduino не найден'
-            : 'Нет соединения · Режим симуляции (ПРОБЕЛ / ЛКМ)'}
+            : wsConnected ? 'Бэкенд доступен · Arduino не найден — подключи датчик'
+            : 'Нет соединения с бэкендом · Подключи устройство'}
         </span>
       </div>
 
@@ -52,7 +93,7 @@ export default function App() {
         <span style={css.hint}>
           {deviceConnected
             ? 'Управление: сожми мышцу — это управляет игрой напрямую.'
-            : <>Управление: зажми <kbd style={css.kbd}>ПРОБЕЛ</kbd> или удержи <kbd style={css.kbd}>ЛКМ</kbd> — это симулирует напряжение мышцы.</>}
+            : 'Подключи EMG датчик (Arduino) для игры.'}
         </span>
       </p>
 
@@ -72,9 +113,17 @@ export default function App() {
       </div>
 
       <div style={css.footer}>
-        <span style={css.footerTxt}>Phantom EMG · v0.4 · Linux Desktop</span>
+        <span style={css.footerTxt}>Phantom EMG · v0.4</span>
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppInner />
+    </AuthProvider>
   );
 }
 
@@ -86,16 +135,20 @@ const css = {
     fontFamily: PH.fontSans, color: PH.ink,
     padding: 40,
   },
-  header: { textAlign: 'center', marginBottom: 12 },
+  header: { textAlign: 'center', marginBottom: 8 },
   brand: { fontFamily: PH.fontSans, fontSize: 48, fontWeight: 700, letterSpacing: '-0.04em' },
   brandSub: { display: 'block', fontFamily: PH.fontMono, fontSize: 12, color: PH.inkFaint, letterSpacing: '0.1em', marginTop: 4 },
+  userBar: {
+    display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16,
+    padding: '6px 14px', borderRadius: 999,
+    background: PH.bgAlt, border: `1px solid ${PH.hair}`,
+  },
+  logoutBtn: {
+    border: 'none', background: 'transparent', fontFamily: PH.fontMono,
+    fontSize: 10, color: PH.inkFaint, cursor: 'pointer', letterSpacing: '0.06em',
+  },
   intro: { textAlign: 'center', fontSize: 15, color: PH.inkDim, lineHeight: 1.6, marginBottom: 36 },
   hint: { fontSize: 13, color: PH.inkFaint },
-  kbd: {
-    background: PH.bgSoft, border: `1px solid ${PH.hairStrong}`,
-    borderRadius: 4, padding: '1px 6px', fontFamily: PH.fontMono,
-    fontSize: 12, color: PH.ink,
-  },
   grid: { display: 'flex', gap: 20 },
   card: {
     width: 240, padding: '28px 24px',
