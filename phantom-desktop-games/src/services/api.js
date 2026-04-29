@@ -33,5 +33,6 @@ export const api = {
   register: (body) => request('/auth/register', { method: 'POST', body: JSON.stringify(body) }),
   getMe:  ()     => request('/users/me'),
   createSession: (body) => request('/sessions', { method: 'POST', body: JSON.stringify(body) }),
+  getSessions:   (limit = 50) => request(`/sessions?limit=${limit}`),
   getProgress:   ()     => request('/sessions/progress'),
 };

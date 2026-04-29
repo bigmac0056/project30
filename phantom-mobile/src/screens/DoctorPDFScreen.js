@@ -13,10 +13,12 @@ import { api } from '../services/api';
 export default function DoctorPDFScreen({ navigation }) {
   const { user } = useAuth();
   const [progress, setProgress] = useState(null);
+  const [sessions, setSessions] = useState([]);
   const [sharing, setSharing] = useState(false);
 
   useEffect(() => {
     api.getProgress().then(setProgress).catch(() => {});
+    api.getSessions(8).then(setSessions).catch(() => {});
   }, []);
 
   const today = new Date().toISOString().split('T')[0];
@@ -36,67 +38,148 @@ export default function DoctorPDFScreen({ navigation }) {
   const handleShare = async () => {
     setSharing(true);
     try {
+      const weakSkill = skills.length ? skills.reduce((a, b) => a.v < b.v ? a : b) : null;
+
       const skillsHtml = skills.map(sk => `
-        <div style="margin-bottom:10px">
-          <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-            <span style="font-size:12px">${sk.n}</span>
-            <span style="font-size:12px;font-weight:700">${sk.v}/100 <span style="color:#A8CC5C">${sk.d}</span></span>
+        <div style="margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:5px">
+            <span style="font-size:12px;color:#333">${sk.n}</span>
+            <span style="font-size:12px;font-weight:700;color:#1A1A1F">
+              ${sk.v}/100&nbsp;&nbsp;<span style="color:${parseInt(sk.d) >= 0 ? '#7FCB3A' : '#E8553A'}">${parseInt(sk.d) >= 0 ? '+' : ''}${sk.d}</span>
+            </span>
           </div>
           <div style="height:6px;background:#E5E1D6;border-radius:3px;overflow:hidden">
-            <div style="height:100%;width:${sk.v}%;background:#A8CC5C;border-radius:3px"></div>
+            <div style="height:100%;width:${Math.max(sk.v, 2)}%;background:#7FCB3A;border-radius:3px"></div>
           </div>
         </div>
       `).join('');
+
+      const sessionsHtml = sessions.length > 0 ? `
+        <div class="label" style="margin-top:16px">ПОСЛЕДНИЕ СЕССИИ</div>
+        <table style="width:100%;border-collapse:collapse;font-size:10px;margin-top:6px">
+          <thead>
+            <tr style="background:#F5F2EC">
+              <th style="text-align:left;padding:5px 6px;font-size:8px;color:#888;letter-spacing:0.8px;text-transform:uppercase;border-bottom:1px solid #E5E1D6">Дата</th>
+              <th style="text-align:left;padding:5px 6px;font-size:8px;color:#888;letter-spacing:0.8px;text-transform:uppercase;border-bottom:1px solid #E5E1D6">Игра</th>
+              <th style="text-align:center;padding:5px 6px;font-size:8px;color:#888;letter-spacing:0.8px;text-transform:uppercase;border-bottom:1px solid #E5E1D6">Счёт</th>
+              <th style="text-align:center;padding:5px 6px;font-size:8px;color:#888;letter-spacing:0.8px;text-transform:uppercase;border-bottom:1px solid #E5E1D6">Актив.</th>
+              <th style="text-align:center;padding:5px 6px;font-size:8px;color:#888;letter-spacing:0.8px;text-transform:uppercase;border-bottom:1px solid #E5E1D6">Точн.</th>
+              <th style="text-align:center;padding:5px 6px;font-size:8px;color:#888;letter-spacing:0.8px;text-transform:uppercase;border-bottom:1px solid #E5E1D6">Доз.</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${sessions.map((s, i) => `
+              <tr style="background:${i % 2 === 0 ? '#fff' : '#F9F7F2'}">
+                <td style="padding:5px 6px;color:#555">${new Date(s.played_at).toLocaleDateString('ru-RU')}</td>
+                <td style="padding:5px 6px;color:#1A1A1F">${s.game}</td>
+                <td style="padding:5px 6px;text-align:center;font-weight:700;color:#1A1A1F">${s.score}</td>
+                <td style="padding:5px 6px;text-align:center;color:#2A9D5C">${s.activation_score ?? 0}</td>
+                <td style="padding:5px 6px;text-align:center;color:#5B4DD9">${s.precision_score ?? 0}</td>
+                <td style="padding:5px 6px;text-align:center;color:#E8553A">${s.dosing_score ?? 0}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      ` : '';
 
       const html = `
         <!DOCTYPE html>
         <html>
         <head><meta charset="utf-8"><style>
-          body { font-family: -apple-system, sans-serif; padding: 32px; color: #1A1A1F; background: #fff; }
-          .brand { font-size: 22px; font-weight: 800; letter-spacing: -1px; }
-          .dot { color: #A8CC5C; }
-          .label { font-size: 9px; color: #888; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
-          .divider { border: none; border-top: 1px solid #E5E1D6; margin: 16px 0; }
-          .stats { display: flex; gap: 12px; margin-bottom: 16px; }
-          .stat-box { flex: 1; background: #F5F2EC; padding: 10px; border-radius: 6px; }
-          .stat-val { font-size: 20px; font-weight: 800; margin: 4px 0 2px; }
-          .green { color: #A8CC5C; }
+          @page { size: A4; margin: 20mm; }
+          body { font-family: -apple-system, Helvetica Neue, sans-serif; color: #1A1A1F; background: #fff; margin: 0; }
+          .brand { font-size: 24px; font-weight: 800; letter-spacing: -1px; }
+          .dot { color: #7FCB3A; }
+          .label { font-size: 8px; color: #888; letter-spacing: 1.2px; text-transform: uppercase; margin-bottom: 5px; }
+          .divider { border: none; border-top: 1px solid #E5E1D6; margin: 14px 0; }
+          .stats { display: flex; gap: 10px; margin-bottom: 14px; }
+          .stat-box { flex: 1; background: #F5F2EC; padding: 10px 12px; border-radius: 6px; }
+          .stat-val { font-size: 22px; font-weight: 800; margin: 3px 0 2px; color: #1A1A1F; }
+          .green { color: #7FCB3A; font-size: 10px; font-weight: 700; }
         </style></head>
         <body>
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
+          <!-- Header -->
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
             <div>
               <div class="brand">Phantom<span class="dot">.</span></div>
-              <div class="label" style="margin-top:4px">ОТЧЁТ ПАЦИЕНТА · ${today}</div>
+              <div class="label" style="margin-top:3px">EMG ТРЕНАЖЁР ДЛЯ РЕАБИЛИТАЦИИ · ОТЧЁТ ПАЦИЕНТА</div>
             </div>
-            <div style="text-align:right;font-size:9px;color:#888">
-              id #${user?.id || '—'}<br>стр. 1 / 1
+            <div style="text-align:right;font-size:9px;color:#888;line-height:1.6">
+              Дата: ${today}<br>
+              ID пациента: #${user?.id || '—'}<br>
+              стр. 1 / 1
             </div>
           </div>
           <hr class="divider">
-          <div class="label">Пациент</div>
-          <div style="font-size:15px;font-weight:600;margin-bottom:4px">${user?.name || '—'}</div>
-          <div style="font-size:11px;color:#555;margin-bottom:16px">${user?.amputation_level || 'Уровень ампутации не указан'}</div>
+
+          <!-- Patient info -->
+          <div style="display:flex;gap:32px;margin-bottom:14px">
+            <div>
+              <div class="label">ФИО / Имя</div>
+              <div style="font-size:15px;font-weight:600">${user?.name || '—'}</div>
+            </div>
+            <div>
+              <div class="label">Уровень ампутации</div>
+              <div style="font-size:13px;color:#555">${user?.amputation_level || 'Не указан'}</div>
+            </div>
+            <div>
+              <div class="label">Неделя реабилитации</div>
+              <div style="font-size:13px;font-weight:600">Неделя ${progress?.current_week ?? 1}</div>
+            </div>
+            <div>
+              <div class="label">Всего тренировок</div>
+              <div style="font-size:13px;font-weight:600">${progress?.total_minutes ?? 0} мин</div>
+            </div>
+          </div>
+          <hr class="divider">
+
+          <!-- Stats summary -->
           <div class="label">СВОДКА · 7 ДНЕЙ</div>
           <div class="stats">
             <div class="stat-box">
               <div class="label">Время</div>
-              <div class="stat-val">${progress?.week_minutes ?? 0} мин</div>
-              <div class="green" style="font-size:10px;font-weight:700">${progress ? (progress.week_pct_change >= 0 ? '+' : '') + progress.week_pct_change + '%' : '—'}</div>
+              <div class="stat-val">${progress?.week_minutes ?? 0} <span style="font-size:13px;font-weight:400">мин</span></div>
+              <div class="green">${progress ? (progress.week_pct_change >= 0 ? '+' : '') + progress.week_pct_change + '%' : '—'} к прошлой неделе</div>
             </div>
             <div class="stat-box">
-              <div class="label">Сессий</div>
+              <div class="label">Сессий всего</div>
               <div class="stat-val">${progress?.total_sessions ?? 0}</div>
-              <div class="green" style="font-size:10px;font-weight:700">серия: ${progress?.streak_days ?? 0} дн</div>
+              <div class="green">серия: ${progress?.streak_days ?? 0} дн подряд</div>
+            </div>
+            <div class="stat-box">
+              <div class="label">Лучший навык</div>
+              <div class="stat-val" style="font-size:15px;padding-top:4px">${
+                skills.length ? skills.reduce((a, b) => a.v > b.v ? a : b).n : '—'
+              }</div>
+              <div class="green">${skills.length ? Math.max(...skills.map(s => s.v)) : 0}/100</div>
             </div>
           </div>
-          <div class="label">НАВЫКИ</div>
-          ${skillsHtml}
           <hr class="divider">
-          <div style="background:#F0F8E0;border-left:3px solid #A8CC5C;padding:10px;margin-top:14px">
-            <div style="font-size:11px;font-weight:700;margin-bottom:4px">Заметка для протезиста</div>
-            <div style="font-size:11px;color:#444;line-height:1.5">
-              Сформировано автоматически приложением Phantom EMG. Данные основаны на ${progress?.total_sessions ?? 0} игровых сессиях. Неделя ${progress?.current_week ?? 1} из ${user?.weeks_to_fitting ?? 16} до примерки протеза.
+
+          <!-- Skills -->
+          <div class="label">EMG НАВЫКИ (среднее за последние 20 сессий)</div>
+          <div style="margin-top:8px">${skillsHtml}</div>
+
+          <!-- Sessions table -->
+          ${sessionsHtml}
+          <hr class="divider">
+
+          <!-- Prosthetist note -->
+          <div style="background:#F0F8E0;border-left:3px solid #7FCB3A;padding:12px 14px;border-radius:4px;margin-top:4px">
+            <div style="font-size:12px;font-weight:700;margin-bottom:6px">📋 Заметка для протезиста / физиотерапевта</div>
+            <div style="font-size:11px;color:#444;line-height:1.6">
+              Сформировано автоматически приложением <strong>Phantom EMG</strong> на основе
+              <strong>${progress?.total_sessions ?? 0} игровых сессий</strong>.
+              Показатели отражают способность пациента управлять мышечным напряжением через биофидбэк-игры.
+              ${weakSkill && weakSkill.v < 60 ? `<strong>Требует внимания:</strong> навык «${weakSkill.n}» (${weakSkill.v}/100) — рекомендуется усилить тренировки.` : ''}
+              Неделя <strong>${progress?.current_week ?? 1}</strong> программы реабилитации.
             </div>
+          </div>
+
+          <!-- Footer -->
+          <div style="display:flex;justify-content:space-between;margin-top:20px;padding-top:10px;border-top:1px solid #E5E1D6;font-size:8px;color:#aaa">
+            <span>Phantom EMG · Сформировано ${today}</span>
+            <span>Данные хранятся на защищённом сервере · только для медицинского использования</span>
           </div>
         </body></html>
       `;

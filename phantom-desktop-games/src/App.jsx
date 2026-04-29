@@ -6,28 +6,27 @@ import GameSteadyClimb from './games/steadyclimb/GameSteadyClimb';
 import { useSensor } from './hooks/useSensor';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import AuthPage from './pages/AuthPage';
+import ProgressPage from './pages/ProgressPage';
+import ReportPage from './pages/ReportPage';
 import { api } from './services/api';
 
 const GAMES = [
   {
     id: 'sparrow', name: 'Sparrow', sub: 'flappy · удержание',
     skill: 'Активация', color: PH.lime, bg: PH.limeSoft,
-    apiKey: 'Sparrow',
   },
   {
     id: 'pulse', name: 'Pulse Run', sub: 'раннер · импульс',
     skill: 'Точность', color: PH.violet, bg: PH.violetSoft,
-    apiKey: 'Pulse Run',
   },
   {
     id: 'climb', name: 'Steady Climb', sub: 'альпинист · дозирование',
     skill: 'Контроль', color: PH.coral, bg: '#FCE6DD',
-    apiKey: 'Steady Climb',
   },
 ];
 
 function AppInner() {
-  const [activeGame, setActiveGame] = useState(null);
+  const [screen, setScreen] = useState('home'); // 'home' | 'sparrow' | 'pulse' | 'climb' | 'progress' | 'report'
   const { wsConnected, deviceConnected } = useSensor();
   const { user, loading, logout } = useAuth();
 
@@ -42,7 +41,7 @@ function AppInner() {
   if (!user) return <AuthPage />;
 
   const handleGameEnd = async ({ score, game, durationSec, emgPeak, emgAvg }) => {
-    setActiveGame(null);
+    setScreen('home');
     try {
       await api.createSession({
         game,
@@ -54,12 +53,16 @@ function AppInner() {
         precision_score:  Math.min(100, Math.round(score / 10)),
         dosing_score:     Math.min(100, Math.round(emgAvg * 100)),
       });
-    } catch { /* session save failure is silent */ }
+    } catch { /* silent */ }
   };
 
-  if (activeGame === 'sparrow') return <GameSparrow onBack={(r) => r ? handleGameEnd({ ...r, game: 'Sparrow' }) : setActiveGame(null)} />;
-  if (activeGame === 'pulse')   return <GamePulseRun onBack={(r) => r ? handleGameEnd({ ...r, game: 'Pulse Run' }) : setActiveGame(null)} />;
-  if (activeGame === 'climb')   return <GameSteadyClimb onBack={(r) => r ? handleGameEnd({ ...r, game: 'Steady Climb' }) : setActiveGame(null)} />;
+  const backHome = (r) => r ? handleGameEnd(r) : setScreen('home');
+
+  if (screen === 'sparrow') return <GameSparrow onBack={(r) => r ? handleGameEnd({ ...r, game: 'Sparrow' }) : setScreen('home')} />;
+  if (screen === 'pulse')   return <GamePulseRun onBack={(r) => r ? handleGameEnd({ ...r, game: 'Pulse Run' }) : setScreen('home')} />;
+  if (screen === 'climb')   return <GameSteadyClimb onBack={(r) => r ? handleGameEnd({ ...r, game: 'Steady Climb' }) : setScreen('home')} />;
+  if (screen === 'progress') return <ProgressPage onBack={() => setScreen('home')} onReport={() => setScreen('report')} />;
+  if (screen === 'report')   return <ReportPage   onBack={() => setScreen('progress')} />;
 
   return (
     <div style={css.root}>
@@ -71,9 +74,9 @@ function AppInner() {
 
       {/* User bar */}
       <div style={css.userBar}>
-        <span style={{ fontFamily: PH.fontMono, fontSize: 11, color: PH.inkDim }}>
-          👤 {user.name}
-        </span>
+        <span style={{ fontFamily: PH.fontMono, fontSize: 11, color: PH.inkDim }}>👤 {user.name}</span>
+        <button style={css.progressBtn} onClick={() => setScreen('progress')}>📊 Прогресс</button>
+        <button style={css.reportNavBtn} onClick={() => setScreen('report')}>📄 Отчёт</button>
         <button style={css.logoutBtn} onClick={logout}>Выйти</button>
       </div>
 
@@ -100,7 +103,7 @@ function AppInner() {
       <div style={css.grid}>
         {GAMES.map(g => (
           <button key={g.id} style={{ ...css.card, background: g.bg, borderColor: `${g.color}33` }}
-            onClick={() => setActiveGame(g.id)}>
+            onClick={() => setScreen(g.id)}>
             <div style={{ ...css.cardDot, background: g.color }} />
             <div style={css.cardName}>{g.name}</div>
             <div style={css.cardSub}>{g.sub}</div>
@@ -113,7 +116,7 @@ function AppInner() {
       </div>
 
       <div style={css.footer}>
-        <span style={css.footerTxt}>Phantom EMG · v0.4</span>
+        <span style={css.footerTxt}>Phantom EMG · v0.5</span>
       </div>
     </div>
   );
@@ -139,9 +142,19 @@ const css = {
   brand: { fontFamily: PH.fontSans, fontSize: 48, fontWeight: 700, letterSpacing: '-0.04em' },
   brandSub: { display: 'block', fontFamily: PH.fontMono, fontSize: 12, color: PH.inkFaint, letterSpacing: '0.1em', marginTop: 4 },
   userBar: {
-    display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16,
+    display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16,
     padding: '6px 14px', borderRadius: 999,
     background: PH.bgAlt, border: `1px solid ${PH.hair}`,
+  },
+  progressBtn: {
+    border: 'none', background: PH.bgSoft, fontFamily: PH.fontSans,
+    fontSize: 11, color: PH.inkDim, cursor: 'pointer',
+    padding: '5px 12px', borderRadius: 999, fontWeight: 600,
+  },
+  reportNavBtn: {
+    border: 'none', background: PH.ink, fontFamily: PH.fontSans,
+    fontSize: 11, color: '#fff', cursor: 'pointer',
+    padding: '5px 12px', borderRadius: 999, fontWeight: 600,
   },
   logoutBtn: {
     border: 'none', background: 'transparent', fontFamily: PH.fontMono,

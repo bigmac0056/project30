@@ -27,7 +27,7 @@ export const api = {
 
   // Sessions
   createSession : (body) => request('/sessions', { method: 'POST', body: JSON.stringify(body) }),
-  getSessions   : ()     => request('/sessions'),
+  getSessions   : (limit = 50) => request(`/sessions?limit=${limit}`),
   getProgress   : ()     => request('/sessions/progress'),
 
   // Calibration
