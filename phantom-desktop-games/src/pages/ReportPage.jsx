@@ -137,29 +137,48 @@ export default function ReportPage({ onBack }) {
 
   const GAME_NAMES = { Sparrow: 'Удержание (Sparrow)', 'Pulse Run': 'Импульс (Pulse Run)', 'Steady Climb': 'Дозирование (Steady Climb)' };
 
+  const Toolbar = () => (
+    <div style={css.toolbar} className="no-print">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <button className="btn-ghost" style={css.backBtn} onClick={onBack}>← Назад</button>
+        <div style={css.toolbarDivider} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <div style={css.toolbarIcon}>📋</div>
+          <div>
+            <div style={{ fontFamily: PH.fontSans, fontSize: 13, fontWeight: 700, color: PH.ink, lineHeight: 1 }}>Клинический отчёт ЭМГ</div>
+            <div style={{ fontFamily: PH.fontMono, fontSize: 9, color: PH.inkFaint, letterSpacing: '0.08em', marginTop: 2 }}>
+              ФОРМА PHM-EMG-01 · ПРЕДПРОСМОТР A4
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={css.patientBadge}>
+          <span style={{ fontSize: 11 }}>👤</span>
+          <span>{user?.name ?? '—'}</span>
+        </div>
+        <button style={css.printBtn} onClick={() => window.print()}>
+          📄 Скачать PDF / Напечатать
+        </button>
+      </div>
+    </div>
+  );
+
   if (loading) return (
     <div style={css.root}>
-      <div style={css.toolbar} className="no-print">
-        <button style={css.backBtn} onClick={onBack}>← Назад</button>
-      </div>
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <span style={{ fontFamily: PH.fontMono, fontSize: 13, color: PH.inkFaint }}>Загрузка клинических данных...</span>
+      <Toolbar />
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12 }}>
+        <div style={css.loadSpinner} />
+        <span style={{ fontFamily: PH.fontMono, fontSize: 12, color: PH.inkFaint, letterSpacing: '0.06em' }}>
+          Загрузка клинических данных...
+        </span>
       </div>
     </div>
   );
 
   return (
     <div style={css.root} className="page-enter">
-      {/* toolbar */}
-      <div style={css.toolbar} className="no-print">
-        <button className="btn-ghost" style={css.backBtn} onClick={onBack}>← Назад</button>
-        <span style={{ fontFamily: PH.fontMono, fontSize: 10, color: PH.inkFaint, letterSpacing: '0.1em' }}>
-          КЛИНИЧЕСКИЙ ОТЧЁТ ЭМГ · ПРЕДПРОСМОТР A4
-        </span>
-        <button className="btn-primary btn-print" style={css.printBtn} onClick={() => window.print()}>
-          📄 Скачать PDF / Напечатать
-        </button>
-      </div>
+      <Toolbar />
 
       <div style={css.scroll}>
         <div style={css.page} id="report-page">
@@ -353,17 +372,42 @@ export default function ReportPage({ onBack }) {
 }
 
 const css = {
-  root: { width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', background: PH.bgSoft, overflow: 'hidden' },
+  root: { width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', background: '#EDEAE3', overflow: 'hidden' },
   toolbar: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '10px 24px', background: PH.bgAlt, borderBottom: `1px solid ${PH.hair}`, flexShrink: 0,
+    padding: '10px 20px 10px 20px',
+    background: 'rgba(255,255,255,0.75)', backdropFilter: 'blur(12px)',
+    borderBottom: `1px solid ${PH.hair}`, flexShrink: 0,
+    boxShadow: '0 1px 12px rgba(0,0,0,0.05)',
   },
-  backBtn: { fontFamily: PH.fontMono, fontSize: 12, color: PH.inkDim, background: 'transparent', border: 'none', cursor: 'pointer' },
+  toolbarDivider: { width: 1, height: 24, background: PH.hair },
+  toolbarIcon: {
+    width: 32, height: 32, borderRadius: 9, background: PH.bgSoft,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: 16, border: `1px solid ${PH.hair}`,
+  },
+  patientBadge: {
+    display: 'flex', alignItems: 'center', gap: 6,
+    padding: '5px 12px', borderRadius: 999,
+    background: PH.bgSoft, border: `1px solid ${PH.hair}`,
+    fontFamily: PH.fontMono, fontSize: 11, color: PH.inkDim,
+  },
+  backBtn: {
+    fontFamily: PH.fontSans, fontSize: 13, fontWeight: 500,
+    color: PH.inkDim, background: 'transparent', border: 'none', cursor: 'pointer',
+    padding: '5px 2px',
+  },
   printBtn: {
     fontFamily: PH.fontSans, fontSize: 13, fontWeight: 600, color: '#fff',
     background: PH.ink, border: 'none', padding: '9px 20px', borderRadius: 10, cursor: 'pointer',
+    boxShadow: '0 3px 12px rgba(0,0,0,0.18)',
   },
-  scroll: { flex: 1, overflowY: 'auto', padding: '28px', display: 'flex', justifyContent: 'center' },
+  loadSpinner: {
+    width: 24, height: 24, borderRadius: '50%',
+    border: `3px solid ${PH.bgSoft}`, borderTopColor: PH.lime,
+    animation: 'spin 0.7s linear infinite',
+  },
+  scroll: { flex: 1, overflowY: 'auto', padding: '32px 28px', display: 'flex', justifyContent: 'center' },
   page: {
     background: '#FFFFFF', width: '210mm', maxWidth: '100%', minHeight: '297mm',
     padding: '18mm', boxShadow: '0 8px 48px rgba(0,0,0,0.14)', borderRadius: 4,
