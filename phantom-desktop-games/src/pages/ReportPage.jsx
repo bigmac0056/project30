@@ -80,7 +80,7 @@ export default function ReportPage({ onBack }) {
   useEffect(() => {
     Promise.all([
       api.getProgress().catch(() => null),
-      api.getSessions(10).catch(() => []),
+      api.getSessions(5).catch(() => []),
       api.getCalibration().catch(() => null),
     ]).then(([prog, sess, cal]) => {
       setProgress(prog); setSessions(sess); setCalib(cal);
@@ -177,10 +177,10 @@ export default function ReportPage({ onBack }) {
   );
 
   return (
-    <div style={css.root} className="page-enter">
+    <div style={css.root} className="page-enter report-root">
       <Toolbar />
 
-      <div style={css.scroll}>
+      <div style={css.scroll} className="report-scroll">
         <div style={css.page} id="report-page">
 
           {/* ── PAGE HEADER ── */}
@@ -238,7 +238,7 @@ export default function ReportPage({ onBack }) {
             </div>
             <div style={css.statBox}>
               <div style={css.statLbl}>Последняя калибровка</div>
-              <div style={css.statVal} style={{ fontSize: 13, paddingTop: 4 }}>
+              <div style={{ ...css.statVal, fontSize: 13, paddingTop: 4 }}>
                 {calib ? fmtDate(calib.calibrated_at) : 'Нет данных'}
               </div>
             </div>
@@ -317,7 +317,7 @@ export default function ReportPage({ onBack }) {
 
           {/* ── CLINICAL ASSESSMENT ── */}
           <div style={css.sectionLabel}>6. КЛИНИЧЕСКОЕ ЗАКЛЮЧЕНИЕ</div>
-          <div style={css.assessBox}>
+          <div className="report-assess" style={css.assessBox}>
             <div style={css.assessTitle}>Автоматическое заключение системы Phantom EMG</div>
             <div style={css.assessBody}>
               {progress && indicators.length > 0 ? (<>
@@ -338,7 +338,7 @@ export default function ReportPage({ onBack }) {
           </div>
 
           {/* signature block */}
-          <div style={{ display: 'flex', gap: 40, marginTop: 20 }}>
+          <div className="report-signatures" style={{ display: 'flex', gap: 40, marginTop: 20 }}>
             {['Протезист / подпись', 'Физиотерапевт / подпись', 'Дата осмотра'].map(lbl => (
               <div key={lbl} style={{ flex: 1 }}>
                 <div style={{ borderBottom: '1px solid #CCC', height: 28, marginBottom: 4 }} />
@@ -348,7 +348,7 @@ export default function ReportPage({ onBack }) {
           </div>
 
           {/* page footer */}
-          <div style={css.pageFooter}>
+          <div className="report-footer" style={css.pageFooter}>
             <span>Phantom EMG · Форма PHM-EMG-01 · {todayIso}</span>
             <span>Конфиденциально — только для медицинского персонала</span>
           </div>
@@ -359,20 +359,44 @@ export default function ReportPage({ onBack }) {
       <style>{`
         @media print {
           .no-print { display: none !important; }
-          body { margin: 0; background: white; }
+          html, body { margin: 0 !important; padding: 0 !important; background: white !important; }
+
+          .report-root {
+            height: auto !important;
+            overflow: visible !important;
+            background: white !important;
+          }
+          .report-scroll {
+            height: auto !important;
+            overflow: visible !important;
+            padding: 0 !important;
+            display: block !important;
+          }
+
           #report-page {
-            box-shadow: none !important; border-radius: 0 !important;
-            margin: 0 !important; width: 210mm !important; max-width: 210mm !important; padding: 18mm !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
+            margin: 0 !important;
+            padding: 12mm !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            min-height: 0 !important;
+            box-sizing: border-box !important;
+          }
+
+          .report-signatures, .report-footer, .report-assess {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
           }
         }
-        @page { size: A4; margin: 0; }
+        @page { size: A4 portrait; margin: 8mm; }
       `}</style>
     </div>
   );
 }
 
 const css = {
-  root: { width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', background: '#EDEAE3', overflow: 'hidden' },
+  root: { width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', background: '#EDEAE3', overflow: 'hidden', contain: 'layout' },
   toolbar: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
     padding: '10px 20px 10px 20px',
@@ -410,7 +434,7 @@ const css = {
   scroll: { flex: 1, overflowY: 'auto', padding: '32px 28px', display: 'flex', justifyContent: 'center' },
   page: {
     background: '#FFFFFF', width: '210mm', maxWidth: '100%', minHeight: '297mm',
-    padding: '18mm', boxShadow: '0 8px 48px rgba(0,0,0,0.14)', borderRadius: 4,
+    padding: '14mm', boxShadow: '0 8px 48px rgba(0,0,0,0.14)', borderRadius: 4,
     boxSizing: 'border-box', fontFamily: PH.fontSans, color: PH.ink,
   },
   pageHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 },
@@ -428,9 +452,9 @@ const css = {
   statVal: { fontFamily: PH.fontSans, fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em', color: PH.ink },
   statUnit: { fontSize: 11, fontWeight: 400, marginLeft: 2 },
   infoBox: { background: '#F5F5F5', borderRadius: 4, padding: '6px 10px' },
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: 10.5 },
-  th: { fontFamily: 'monospace', fontSize: 7.5, letterSpacing: '0.06em', color: '#888', textAlign: 'left', padding: '5px 7px', borderBottom: '1px solid #E5E1D6', whiteSpace: 'pre-line' },
-  td: { fontFamily: 'monospace', fontSize: 10.5, color: PH.ink, padding: '5px 7px' },
+  table: { width: '100%', borderCollapse: 'collapse', fontSize: 10 },
+  th: { fontFamily: 'monospace', fontSize: 7.5, letterSpacing: '0.05em', color: '#888', textAlign: 'left', padding: '5px 6px', borderBottom: '1px solid #E5E1D6', whiteSpace: 'pre-line' },
+  td: { fontFamily: 'monospace', fontSize: 10, color: PH.ink, padding: '5px 6px' },
   assessBox: { background: '#F0F8E0', border: '1px solid #C5E08A', borderLeft: '3px solid #7FCB3A', padding: '12px 16px', borderRadius: 4 },
   assessTitle: { fontFamily: PH.fontSans, fontSize: 11, fontWeight: 700, color: PH.ink, marginBottom: 6 },
   assessBody: { fontFamily: PH.fontSans, fontSize: 11, color: '#333', lineHeight: 1.65 },
