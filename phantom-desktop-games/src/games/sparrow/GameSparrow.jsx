@@ -1,10 +1,8 @@
 /**
- * GameSparrow — Ghost Mode + Live EMG only
- * ─────────────────────────────────────────
- * Fixes:
- *  • Pre-game modal with duration selector (30/60/90/120 s)
- *  • Proportional lift — stronger squeeze = stronger lift, capped gently
- *  • Score only when bird actually passes THROUGH the gap
+ * GameSparrow — Flappy Bird · EMG hold-to-fly
+ * ─────────────────────────────────────────────
+ * Physics: proportional + sub-threshold cushion + EMG low-pass filter
+ * Saves session via onBack(result) when leaving result screen.
  */
 import React, { useRef, useEffect, useState } from 'react';
 import { PH } from '../../theme';
@@ -12,16 +10,21 @@ import EMGWave from '../../shared/EMGWave';
 import { useSensor } from '../../hooks/useSensor';
 
 const W = window.innerWidth, H = window.innerHeight;
-const GROUND   = H - 100;
-const PIPE_W   = 80, GAP = 220, SPEED = 3.2;
-const THRESHOLD = 0.42;
-const BIRD_X    = 200;
+const GROUND      = H - 100;
+const PIPE_W      = 80, GAP = 220, SPEED = 3.2;
+const THRESHOLD   = 0.42;
+const BIRD_X      = 200;
 const INVINCIBLE_MS = 1200;
-const DURATIONS = [30, 60, 90, 120];
+const DURATIONS   = [30, 60, 90, 120];
+
+// Physics constants
+const GRAVITY   = 0.30;   // softer than before (was 0.55)
+const MAX_FALL  = 8;      // terminal fall (was 13)
+const MAX_RISE  = -5;     // max upward velocity
 
 function makePipes() {
   return [
-    { x: W + 100,           topH: 100 + Math.random() * 180, scored: false },
+    { x: W + 100,            topH: 100 + Math.random() * 180, scored: false },
     { x: W + 100 + W * 0.55, topH:  90 + Math.random() * 200, scored: false },
   ];
 }
@@ -29,8 +32,7 @@ function makePipes() {
 export default function GameSparrow({ onBack }) {
   const { deviceConnected, sensorData } = useSensor();
 
-  /* ── UI state ── */
-  const [screen,   setScreen]   = useState('start');  // 'start' | 'playing' | 'result'
+  const [screen,   setScreen]   = useState('start');
   const [duration, setDuration] = useState(60);
   const [timeLeft, setTimeLeft] = useState(60);
   const [ui,       setUi]       = useState({ score: 0, combo: 0, emg: 0 });
@@ -38,25 +40,28 @@ export default function GameSparrow({ onBack }) {
   const canvasRef  = useRef(null);
   const rafRef     = useRef(null);
   const timerRef   = useRef(null);
+  const resultRef  = useRef(null);   // holds { score, durationSec, emgPeak, emgAvg }
 
   const stateRef = useRef({
-    emg: 0, birdY: H * 0.42, vel: 0,
+    emg: 0, emgRaw: 0,                        // smoothed vs raw sensor value
+    emgPeak: 0, emgAvgSum: 0, emgAvgCount: 0, // for session saving
+    birdY: H * 0.42, vel: 0,
     pipes: makePipes(), score: 0, combo: 0,
     phase: 'idle', lastTime: null, hitTime: 0, birdFlash: 0,
-    startTime: null, duration: 60,
+    duration: 60,
   });
 
-  /* ── sensor → stateRef ── */
+  /* ── sensor → emgRaw (smoothing happens in tick) ── */
   useEffect(() => {
-    if (!deviceConnected || !sensorData) { stateRef.current.emg = 0; return; }
+    if (!deviceConnected || !sensorData) { stateRef.current.emgRaw = 0; return; }
     const norm = Math.max(0, Math.min(1, sensorData.norm ?? 0));
-    stateRef.current.emg = norm;
-    if (norm > 0.15 && stateRef.current.phase === 'idle' && screen === 'playing') {
+    stateRef.current.emgRaw = norm;
+    if (norm > 0.12 && stateRef.current.phase === 'idle' && screen === 'playing') {
       stateRef.current.phase = 'playing';
     }
   }, [sensorData, deviceConnected, screen]);
 
-  /* ── start game ── */
+  /* ── start / reset ── */
   const startGame = (dur) => {
     const st = stateRef.current;
     st.pipes    = makePipes();
@@ -65,11 +70,16 @@ export default function GameSparrow({ onBack }) {
     st.score    = 0;
     st.combo    = 0;
     st.emg      = 0;
+    st.emgRaw   = 0;
+    st.emgPeak  = 0;
+    st.emgAvgSum= 0;
+    st.emgAvgCount = 0;
     st.hitTime  = 0;
     st.birdFlash= 0;
     st.lastTime = null;
     st.phase    = 'idle';
     st.duration = dur;
+    resultRef.current = null;
     setUi({ score: 0, combo: 0, emg: 0 });
     setTimeLeft(dur);
     setDuration(dur);
@@ -83,7 +93,15 @@ export default function GameSparrow({ onBack }) {
       setTimeLeft(t => {
         if (t <= 1) {
           clearInterval(timerRef.current);
-          stateRef.current.phase = 'done';
+          const st = stateRef.current;
+          st.phase = 'done';
+          // Package result for session saving
+          resultRef.current = {
+            score: st.score,
+            durationSec: st.duration,
+            emgPeak: st.emgPeak,
+            emgAvg: st.emgAvgCount > 0 ? st.emgAvgSum / st.emgAvgCount : 0,
+          };
           setScreen('result');
           return 0;
         }
@@ -107,46 +125,47 @@ export default function GameSparrow({ onBack }) {
       const dt = Math.min((time - st.lastTime) / 16.67, 3);
       st.lastTime = time;
 
+      // ── Low-pass EMG filter (smooth muscle release) ──
+      st.emg = st.emg * 0.85 + (st.emgRaw ?? 0) * 0.15;
+
       if (st.phase === 'playing') {
-        /* ── Physics: proportional lift ── */
-        if (st.emg > THRESHOLD) {
-          // How far above threshold (0→1)
-          const power = Math.min(1, (st.emg - THRESHOLD) / (1 - THRESHOLD));
-          // Gentle proportional lift, max upward vel = -6 (was -11)
-          st.vel = Math.max(st.vel - power * 0.42 * dt, -6);
-        } else {
-          st.vel = Math.min(st.vel + 0.55 * dt, 13);
+        // ── Track EMG metrics for session ──
+        if (st.emg > st.emgPeak) st.emgPeak = st.emg;
+        if (st.emg > 0.01) { st.emgAvgSum += st.emg; st.emgAvgCount++; }
+
+        // ── Physics: gravity + progressive EMG counterforce ──
+        // Apply gravity always
+        st.vel += GRAVITY * dt;
+
+        if (st.emg >= THRESHOLD) {
+          // Above threshold: cancel gravity + proportional upward push
+          const power = (st.emg - THRESHOLD) / (1 - THRESHOLD);
+          st.vel -= (GRAVITY + power * 0.55) * dt;
+        } else if (st.emg > 0) {
+          // Below threshold: partial cushion — soft landing, not a brick fall
+          const cushion = (st.emg / THRESHOLD) * GRAVITY;
+          st.vel -= cushion * dt;
         }
+
+        st.vel  = Math.max(MAX_RISE, Math.min(MAX_FALL, st.vel));
         st.birdY = Math.max(60, Math.min(GROUND - 50, st.birdY + st.vel * dt));
 
-        /* ── Pipes + correct scoring ── */
+        // ── Pipes + gap scoring ──
         for (const p of st.pipes) {
           p.x -= SPEED * dt;
-
-          // Score only when the ENTIRE pipe has passed the bird (right edge < bird left edge)
           if (!p.scored && p.x + PIPE_W < BIRD_X - 20) {
             p.scored = true;
-            // Check bird is actually inside the gap
             const inGap = st.birdY - 20 >= p.topH && st.birdY + 20 <= p.topH + GAP;
-            if (inGap) {
-              st.score += 10;
-              st.combo  += 1;
-              setUi(u => ({ ...u, score: st.score, combo: st.combo }));
-            } else {
-              st.combo = 0;
-              setUi(u => ({ ...u, combo: 0 }));
-            }
+            if (inGap) { st.score += 10; st.combo += 1; }
+            else { st.combo = 0; }
+            setUi(u => ({ ...u, score: st.score, combo: st.combo }));
           }
-
-          if (p.x < -PIPE_W) {
-            p.x = W + 80; p.topH = 90 + Math.random() * 200; p.scored = false;
-          }
+          if (p.x < -PIPE_W) { p.x = W + 80; p.topH = 90 + Math.random() * 200; p.scored = false; }
         }
 
-        /* ── Ghost collision (flash, no death) ── */
+        // ── Ghost collision (flash, no death) ──
         const now = Date.now();
-        const isInvincible = now - st.hitTime < INVINCIBLE_MS;
-        if (!isInvincible) {
+        if (now - st.hitTime >= INVINCIBLE_MS) {
           for (const p of st.pipes) {
             const ho = BIRD_X + 22 > p.x && BIRD_X - 22 < p.x + PIPE_W;
             if (ho && (st.birdY - 22 < p.topH || st.birdY + 22 > p.topH + GAP)) {
@@ -155,9 +174,7 @@ export default function GameSparrow({ onBack }) {
               break;
             }
           }
-          if (st.birdY >= GROUND - 48) {
-            st.hitTime = now; st.birdFlash = 1; st.vel = -8;
-          }
+          if (st.birdY >= GROUND - 48) { st.hitTime = now; st.birdFlash = 1; st.vel = -4; }
         }
         if (st.birdFlash > 0) st.birdFlash = Math.max(0, st.birdFlash - 0.08 * dt);
       }
@@ -192,76 +209,49 @@ export default function GameSparrow({ onBack }) {
       ctx.globalAlpha = 1;
 
       drawEMGMeter(ctx, 22, 110, H - 210, st.emg, THRESHOLD);
-
       setUi(u => ({ ...u, emg: st.emg }));
+
       rafRef.current = requestAnimationFrame(tick);
     };
 
-    // Start physics only when EMG fires (idle → playing done in sensor effect)
-    // But if already has EMG signal, jump straight to playing
-    if (stateRef.current.emg > 0.15) stateRef.current.phase = 'playing';
-
+    if (stateRef.current.emgRaw > 0.12) stateRef.current.phase = 'playing';
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
   }, [screen]);
 
-  const finalScore = stateRef.current.score;
   const { score, combo, emg } = ui;
   const mins = Math.floor(timeLeft / 60);
   const secs = timeLeft % 60;
-  const timerStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+  const timerStr  = `${mins}:${secs.toString().padStart(2, '0')}`;
   const timerWarn = timeLeft <= 10;
 
-  /* ════════════════════════════════════════
-     START SCREEN
-  ════════════════════════════════════════ */
+  /* ════ START SCREEN ════ */
   if (screen === 'start') return (
     <div style={css.modalRoot}>
       <div style={css.modal}>
         <div style={css.modalIcon}>🐦</div>
         <div style={css.modalTitle}>Sparrow</div>
         <div style={css.modalSub}>Управление мышцей · Удержание высоты</div>
-
         <div style={css.modalRule} />
-
         <div style={css.modalLabel}>ДЛИТЕЛЬНОСТЬ СЕССИИ</div>
         <div style={css.durGrid}>
           {DURATIONS.map(d => (
-            <button
-              key={d}
-              className={`dur-btn${duration === d ? ' dur-btn-active' : ''}`}
+            <button key={d}
               style={{ ...css.durBtn, ...(duration === d ? css.durBtnActive : {}) }}
-              onClick={() => setDuration(d)}
-            >
+              onClick={() => setDuration(d)}>
               {d < 60 ? `${d}с` : `${d / 60} мин`}
             </button>
           ))}
         </div>
-
         <div style={css.modalRule} />
-
-        <div style={css.modalHint}>
-          <span style={css.hintDot} />
-          Сожми мышцу — птица взлетает · Расслабь — падает
-        </div>
-        <div style={css.modalHint}>
-          <span style={{ ...css.hintDot, background: PH.violet }} />
-          Очки только за прохождение в щель между трубами
-        </div>
-
+        <div style={css.modalHint}><span style={css.hintDot} />Сожми мышцу — птица взлетает · Расслабь — плавно падает</div>
+        <div style={css.modalHint}><span style={{ ...css.hintDot, background: PH.violet }} />Очки только за прохождение в щель</div>
         <div style={css.modalRule} />
-
-        {!deviceConnected && (
-          <div style={css.warnBox}>🦾 Подключи EMG датчик перед началом</div>
-        )}
-
-        <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+        {!deviceConnected && <div style={css.warnBox}>🦾 Подключи EMG датчик перед началом</div>}
+        <div style={{ display: 'flex', gap: 10, marginTop: 4, width: '100%' }}>
           <button style={css.backBtnModal} onClick={onBack}>← Назад</button>
-          <button
-            style={{ ...css.startBtn, opacity: deviceConnected ? 1 : 0.45 }}
-            disabled={!deviceConnected}
-            onClick={() => startGame(duration)}
-          >
+          <button style={{ ...css.startBtn, opacity: deviceConnected ? 1 : 0.45 }}
+            disabled={!deviceConnected} onClick={() => startGame(duration)}>
             Начать →
           </button>
         </div>
@@ -269,50 +259,51 @@ export default function GameSparrow({ onBack }) {
     </div>
   );
 
-  /* ════════════════════════════════════════
-     RESULT SCREEN
-  ════════════════════════════════════════ */
-  if (screen === 'result') return (
-    <div style={css.modalRoot}>
-      <div style={css.modal}>
-        <div style={css.modalIcon}>🏆</div>
-        <div style={css.modalTitle}>Результат</div>
-        <div style={css.modalSub}>Sparrow · {duration}с</div>
-
-        <div style={css.modalRule} />
-
-        <div style={css.resultGrid}>
-          <div style={css.resultBox}>
-            <div style={css.resultLbl}>СЧЁТ</div>
-            <div style={{ ...css.resultVal, color: PH.lime }}>{finalScore}</div>
+  /* ════ RESULT SCREEN ════ */
+  if (screen === 'result') {
+    const res = resultRef.current;
+    return (
+      <div style={css.modalRoot}>
+        <div style={css.modal}>
+          <div style={css.modalIcon}>🏆</div>
+          <div style={css.modalTitle}>Результат</div>
+          <div style={css.modalSub}>Sparrow · {duration}с</div>
+          <div style={css.modalRule} />
+          <div style={css.resultGrid}>
+            <div style={css.resultBox}>
+              <div style={css.resultLbl}>СЧЁТ</div>
+              <div style={{ ...css.resultVal, color: PH.lime }}>{res?.score ?? 0}</div>
+            </div>
+            <div style={css.resultBox}>
+              <div style={css.resultLbl}>ВРЕМЯ</div>
+              <div style={css.resultVal}>{duration}с</div>
+            </div>
+            <div style={css.resultBox}>
+              <div style={css.resultLbl}>ЭМГ ПИКИ</div>
+              <div style={{ ...css.resultVal, fontSize: 20, color: PH.violet }}>
+                {Math.round((res?.emgPeak ?? 0) * 100)}%
+              </div>
+            </div>
           </div>
-          <div style={css.resultBox}>
-            <div style={css.resultLbl}>ВРЕМЯ</div>
-            <div style={css.resultVal}>{duration}с</div>
+          <div style={css.modalRule} />
+          <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+            {/* "← Меню" triggers session save via onBack(result) */}
+            <button style={css.backBtnModal} onClick={() => onBack(res)}>← Меню</button>
+            <button style={css.startBtn} onClick={() => startGame(duration)}>↺ Ещё раз</button>
           </div>
-        </div>
-
-        <div style={css.modalRule} />
-
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button style={css.backBtnModal} onClick={onBack}>← Меню</button>
-          <button style={css.startBtn} onClick={() => startGame(duration)}>↺ Ещё раз</button>
         </div>
       </div>
-    </div>
-  );
+    );
+  }
 
-  /* ════════════════════════════════════════
-     GAME SCREEN
-  ════════════════════════════════════════ */
+  /* ════ GAME SCREEN ════ */
   return (
     <div style={css.root}>
       <canvas ref={canvasRef} style={css.canvas} />
 
       {/* HUD */}
       <div style={css.hud}>
-        <button style={css.pauseBtn} onClick={onBack}>◀ Выйти</button>
-
+        <button style={css.pauseBtn} onClick={() => { clearInterval(timerRef.current); cancelAnimationFrame(rafRef.current); onBack(null); }}>◀ Выйти</button>
         <div style={css.scoreBox}>
           <div style={css.scoreItem}>
             <span style={css.scoreLbl}>SCORE</span>
@@ -324,15 +315,12 @@ export default function GameSparrow({ onBack }) {
             <span style={css.scoreVal}>×{combo}</span>
           </div>
         </div>
-
-        {/* Timer */}
-        <div style={{ ...css.timerBox, borderColor: timerWarn ? `${PH.coral}88` : `${PH.hair}`, background: timerWarn ? `${PH.coral}12` : 'rgba(255,255,255,0.92)' }}>
+        <div style={{ ...css.timerBox, borderColor: timerWarn ? `${PH.coral}88` : PH.hair, background: timerWarn ? `${PH.coral}12` : 'rgba(255,255,255,0.92)' }}>
           <span style={{ fontFamily: PH.fontMono, fontSize: 9, color: timerWarn ? PH.coral : PH.inkFaint, letterSpacing: '0.1em', marginBottom: 1 }}>ВРЕМЯ</span>
           <span style={{ fontFamily: PH.fontSans, fontSize: 22, fontWeight: 700, color: timerWarn ? PH.coral : PH.ink, lineHeight: 1 }}>{timerStr}</span>
         </div>
-
         <div style={{ ...css.sensorPill, borderColor: deviceConnected ? `${PH.lime}55` : `${PH.coral}55` }}>
-          <span style={{ ...css.sensorDot, background: deviceConnected ? PH.limeBright : PH.coral, boxShadow: deviceConnected ? `0 0 10px ${PH.limeBright}` : 'none' }} />
+          <span style={{ ...css.sensorDot, background: deviceConnected ? PH.limeBright : PH.coral, boxShadow: deviceConnected ? `0 0 10px ${PH.limeBright}` : 'none' }} className={deviceConnected ? 'dot-connected' : ''} />
           {deviceConnected ? 'ДАТЧИК · ПОДКЛЮЧЁН' : 'ДАТЧИК · НЕТ'}
         </div>
       </div>
@@ -340,18 +328,15 @@ export default function GameSparrow({ onBack }) {
       {/* Wave strip */}
       <div style={css.waveStrip}>
         <div style={css.waveMeta}>
-          <span style={{ fontFamily: PH.fontMono, fontSize: 10, letterSpacing: '0.1em', color: PH.inkDim }}>СИГНАЛ В РЕАЛЬНОМ ВРЕМЕНИ</span>
-          <span style={{ fontFamily: PH.fontMono, fontSize: 10, color: deviceConnected ? PH.lime : PH.inkFaint, fontWeight: 700 }}>{deviceConnected ? '● ЖИВО' : '— НЕТ СИГНАЛА'}</span>
+          <span style={{ fontFamily: PH.fontMono, fontSize: 10, letterSpacing: '0.1em', color: PH.inkDim }}>СИГНАЛ EMG</span>
+          <span style={{ fontFamily: PH.fontMono, fontSize: 10, color: deviceConnected ? PH.lime : PH.inkFaint, fontWeight: 700 }}>{deviceConnected ? `● ${Math.round(emg * 100)}%` : '— НЕТ СИГНАЛА'}</span>
         </div>
         <EMGWave width={W - 120} height={40} intensity={Math.max(emg, 0.4)} density={1.6} />
       </div>
 
       {/* Idle hint */}
       {stateRef.current.phase === 'idle' && deviceConnected && (
-        <div style={css.hint}>
-          <span style={css.hintDot2} />
-          Сожми мышцу чтобы начать
-        </div>
+        <div style={css.hint}><span style={css.hintDot2} />Сожми мышцу чтобы начать</div>
       )}
 
       {/* No device overlay */}
@@ -359,7 +344,7 @@ export default function GameSparrow({ onBack }) {
         <div style={css.overlay}>
           <span style={{ fontSize: 56 }}>🦾</span>
           <span style={css.ovTitle}>Подключи EMG датчик</span>
-          <span style={css.ovSub}>Игра управляется только через датчик мышц.<br />Подключи Arduino — игра стартует автоматически.</span>
+          <span style={css.ovSub}>Подключи Arduino — игра стартует автоматически.</span>
           <button style={{ ...css.ovBtn, background: PH.ink, marginTop: 8 }} onClick={onBack}>← Назад в меню</button>
         </div>
       )}
@@ -420,40 +405,37 @@ function drawEMGMeter(ctx, x, y, h, emg, threshold) {
   ctx.fillStyle = fg; ctx.fillRect(x, y + h - fillH, w, fillH);
   ctx.restore();
   ctx.strokeStyle = PH.violet; ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(x - 3, y + h - threshold * h);
-  ctx.lineTo(x + w + 3, y + h - threshold * h);
-  ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x - 3, y + h - threshold * h); ctx.lineTo(x + w + 3, y + h - threshold * h); ctx.stroke();
   ctx.fillStyle = 'rgba(255,255,255,0.88)';
   ctx.beginPath(); ctx.roundRect(x - 6, y + h + 8, 30, 22, 11); ctx.fill();
   ctx.fillStyle = PH.lime; ctx.font = `700 10px monospace`;
   ctx.fillText(`${Math.round(emg * 100)}%`, x + w / 2, y + h + 23);
 }
 
+const PH_KEYS = { lime: '#3D7A1F', limeBright: '#7FCB3A', violet: '#5B4DD9', coral: '#E8553A', ink: '#1A1A1F', inkFaint: '#9A9AA8', inkDim: '#5C5C68', hair: 'rgba(20,20,30,0.08)', bg: '#F5F2EC', bgAlt: '#FFFFFF', bgSoft: '#EDE9DF', fontSans: '"Space Grotesk", system-ui, sans-serif', fontMono: '"JetBrains Mono", ui-monospace, monospace' };
+
 const css = {
-  /* game screen */
   root: { width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden', userSelect: 'none' },
   canvas: { position: 'absolute', inset: 0, width: '100%', height: '100%' },
   hud: { position: 'absolute', top: 16, left: 16, right: 16, display: 'flex', alignItems: 'center', gap: 12, zIndex: 10 },
-  pauseBtn: { padding: '8px 14px', borderRadius: 999, border: `1px solid ${PH.hair}`, background: 'rgba(255,255,255,0.92)', fontFamily: PH.fontMono, fontSize: 12, color: PH.ink, cursor: 'pointer', letterSpacing: '0.05em' },
+  pauseBtn: { padding: '8px 14px', borderRadius: 999, border: `1px solid ${PH.hair}`, background: 'rgba(255,255,255,0.92)', fontFamily: PH.fontMono, fontSize: 12, color: PH.ink, cursor: 'pointer' },
   scoreBox: { display: 'flex', alignItems: 'center', gap: 16, padding: '8px 18px', borderRadius: 999, background: 'rgba(255,255,255,0.92)', border: `1px solid ${PH.hair}`, boxShadow: '0 4px 20px rgba(0,0,0,0.06)' },
   scoreItem: { display: 'flex', flexDirection: 'column', alignItems: 'center' },
   scoreLbl: { fontFamily: PH.fontMono, fontSize: 9, color: PH.inkFaint, letterSpacing: '0.1em' },
   scoreVal: { fontFamily: PH.fontSans, fontSize: 22, fontWeight: 700, color: PH.ink, lineHeight: 1 },
   divider: { width: 1, height: 28, background: PH.hair },
   timerBox: { display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '6px 16px', borderRadius: 999, border: '1px solid', boxShadow: '0 4px 20px rgba(0,0,0,0.06)' },
-  sensorPill: { marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: 999, background: 'rgba(255,255,255,0.92)', border: `1px solid ${PH.hair}`, fontFamily: PH.fontMono, fontSize: 10, color: PH.ink, letterSpacing: '0.08em' },
+  sensorPill: { marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: 999, background: 'rgba(255,255,255,0.92)', border: '1px solid', fontFamily: PH.fontMono, fontSize: 10, color: PH.ink, letterSpacing: '0.08em' },
   sensorDot: { width: 8, height: 8, borderRadius: '50%', display: 'inline-block' },
-  waveStrip: { position: 'absolute', bottom: 12, left: 100, right: 24, padding: '10px 16px', borderRadius: 14, background: 'rgba(255,255,255,0.92)', border: `1px solid ${PH.hair}`, zIndex: 5, boxShadow: '0 4px 20px rgba(0,0,0,0.06)' },
+  waveStrip: { position: 'absolute', bottom: 12, left: 100, right: 24, padding: '10px 16px', borderRadius: 14, background: 'rgba(255,255,255,0.92)', border: `1px solid ${PH.hair}`, zIndex: 5 },
   waveMeta: { display: 'flex', justifyContent: 'space-between', marginBottom: 4 },
-  hint: { position: 'absolute', bottom: 110, left: '50%', transform: 'translateX(-50%)', padding: '10px 20px', borderRadius: 999, background: 'rgba(255,255,255,0.94)', border: `1px solid ${PH.hair}`, fontFamily: PH.fontSans, fontSize: 14, color: PH.ink, display: 'flex', alignItems: 'center', gap: 8, zIndex: 8, boxShadow: '0 4px 20px rgba(0,0,0,0.08)', whiteSpace: 'nowrap' },
+  hint: { position: 'absolute', bottom: 110, left: '50%', transform: 'translateX(-50%)', padding: '10px 20px', borderRadius: 999, background: 'rgba(255,255,255,0.94)', border: `1px solid ${PH.hair}`, fontFamily: PH.fontSans, fontSize: 14, color: PH.ink, display: 'flex', alignItems: 'center', gap: 8, zIndex: 8, whiteSpace: 'nowrap' },
   hintDot2: { width: 8, height: 8, borderRadius: '50%', background: PH.lime, boxShadow: `0 0 8px ${PH.lime}`, display: 'inline-block' },
   overlay: { position: 'absolute', inset: 0, background: 'rgba(245,242,236,0.97)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, zIndex: 20 },
-  ovTitle: { fontFamily: PH.fontSans, fontSize: 32, fontWeight: 700, color: PH.ink, letterSpacing: '-0.03em' },
+  ovTitle: { fontFamily: PH.fontSans, fontSize: 32, fontWeight: 700, color: PH.ink },
   ovSub: { fontFamily: PH.fontSans, fontSize: 15, color: PH.inkDim, textAlign: 'center', lineHeight: 1.6, maxWidth: 400 },
   ovBtn: { padding: '12px 28px', borderRadius: 12, border: 'none', cursor: 'pointer', fontFamily: PH.fontSans, fontSize: 16, fontWeight: 600, color: '#FFF' },
-
-  /* modal screens */
+  /* modals */
   modalRoot: { width: '100vw', height: '100vh', background: PH.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: PH.fontSans },
   modal: { background: PH.bgAlt, border: `1px solid ${PH.hair}`, borderRadius: 24, padding: '36px 40px', width: 420, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, boxShadow: '0 16px 64px rgba(0,0,0,0.10)' },
   modalIcon: { fontSize: 48, lineHeight: 1 },
@@ -469,7 +451,7 @@ const css = {
   warnBox: { background: `${PH.coral}15`, border: `1px solid ${PH.coral}44`, borderRadius: 10, padding: '10px 16px', fontFamily: PH.fontSans, fontSize: 13, color: PH.coral, width: '100%', textAlign: 'center', boxSizing: 'border-box' },
   backBtnModal: { flex: 1, padding: '13px 0', borderRadius: 13, border: `1.5px solid ${PH.hair}`, background: PH.bg, fontFamily: PH.fontSans, fontSize: 15, fontWeight: 600, color: PH.inkDim, cursor: 'pointer' },
   startBtn: { flex: 2, padding: '13px 0', borderRadius: 13, border: 'none', background: PH.ink, fontFamily: PH.fontSans, fontSize: 15, fontWeight: 600, color: '#FFF', cursor: 'pointer' },
-  resultGrid: { display: 'flex', gap: 12, width: '100%' },
+  resultGrid: { display: 'flex', gap: 10, width: '100%' },
   resultBox: { flex: 1, background: PH.bg, borderRadius: 12, padding: '14px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', border: `1px solid ${PH.hair}` },
   resultLbl: { fontFamily: PH.fontMono, fontSize: 9, color: PH.inkFaint, letterSpacing: '0.1em' },
   resultVal: { fontFamily: PH.fontSans, fontSize: 28, fontWeight: 700, color: PH.ink, marginTop: 4 },
