@@ -1,8 +1,9 @@
 /**
  * GameSparrow — Flappy Bird · EMG hold-to-fly
  * ─────────────────────────────────────────────
- * Physics: proportional + sub-threshold cushion + EMG low-pass filter
- * Saves session via onBack(result) when leaving result screen.
+ * Physics: FULLY PROPORTIONAL — no threshold cliff.
+ * Any muscle tension provides proportional lift.
+ * At HOVER_EMG the bird hovers; below = falls; above = rises.
  */
 import React, { useRef, useEffect, useState } from 'react';
 import { PH } from '../../theme';
@@ -12,15 +13,16 @@ import { useSensor } from '../../hooks/useSensor';
 const W = window.innerWidth, H = window.innerHeight;
 const GROUND      = H - 100;
 const PIPE_W      = 80, GAP = 220, SPEED = 3.2;
-const THRESHOLD   = 0.42;
 const BIRD_X      = 200;
 const INVINCIBLE_MS = 1200;
 const DURATIONS   = [30, 60, 90, 120];
 
-// Physics constants
-const GRAVITY   = 0.30;   // softer than before (was 0.55)
-const MAX_FALL  = 8;      // terminal fall (was 13)
-const MAX_RISE  = -5;     // max upward velocity
+// Physics — pure proportional, no threshold cliff
+const GRAVITY    = 0.32;   // downward acceleration per frame
+const HOVER_EMG  = 0.45;   // EMG level at which bird hovers (net force = 0)
+const LIFT_COEFF = GRAVITY / HOVER_EMG; // linear lift coefficient
+const MAX_FALL   = 8;
+const MAX_RISE   = -5;
 
 function makePipes() {
   return [
@@ -43,8 +45,9 @@ export default function GameSparrow({ onBack }) {
   const resultRef  = useRef(null);   // holds { score, durationSec, emgPeak, emgAvg }
 
   const stateRef = useRef({
-    emg: 0, emgRaw: 0,                        // smoothed vs raw sensor value
-    emgPeak: 0, emgAvgSum: 0, emgAvgCount: 0, // for session saving
+    emg: 0, emgRaw: 0,
+    emgPeak: 0, emgAvgSum: 0, emgAvgCount: 0,
+    pipesAttempted: 0, pipesCleared: 0,        // for precision score
     birdY: H * 0.42, vel: 0,
     pipes: makePipes(), score: 0, combo: 0,
     phase: 'idle', lastTime: null, hitTime: 0, birdFlash: 0,
@@ -56,7 +59,8 @@ export default function GameSparrow({ onBack }) {
     if (!deviceConnected || !sensorData) { stateRef.current.emgRaw = 0; return; }
     const norm = Math.max(0, Math.min(1, sensorData.norm ?? 0));
     stateRef.current.emgRaw = norm;
-    if (norm > 0.12 && stateRef.current.phase === 'idle' && screen === 'playing') {
+    // Start immediately on any signal — no artificial dead zone
+    if (norm > 0.02 && stateRef.current.phase === 'idle' && screen === 'playing') {
       stateRef.current.phase = 'playing';
     }
   }, [sensorData, deviceConnected, screen]);
@@ -74,6 +78,8 @@ export default function GameSparrow({ onBack }) {
     st.emgPeak  = 0;
     st.emgAvgSum= 0;
     st.emgAvgCount = 0;
+    st.pipesAttempted = 0;
+    st.pipesCleared   = 0;
     st.hitTime  = 0;
     st.birdFlash= 0;
     st.lastTime = null;
@@ -101,6 +107,9 @@ export default function GameSparrow({ onBack }) {
             durationSec: st.duration,
             emgPeak: st.emgPeak,
             emgAvg: st.emgAvgCount > 0 ? st.emgAvgSum / st.emgAvgCount : 0,
+            precisionScore: st.pipesAttempted > 0
+              ? Math.round(st.pipesCleared / st.pipesAttempted * 100)
+              : 0,
           };
           setScreen('result');
           return 0;
@@ -133,30 +142,22 @@ export default function GameSparrow({ onBack }) {
         if (st.emg > st.emgPeak) st.emgPeak = st.emg;
         if (st.emg > 0.01) { st.emgAvgSum += st.emg; st.emgAvgCount++; }
 
-        // ── Physics: gravity + progressive EMG counterforce ──
-        // Apply gravity always
-        st.vel += GRAVITY * dt;
-
-        if (st.emg >= THRESHOLD) {
-          // Above threshold: cancel gravity + proportional upward push
-          const power = (st.emg - THRESHOLD) / (1 - THRESHOLD);
-          st.vel -= (GRAVITY + power * 0.55) * dt;
-        } else if (st.emg > 0) {
-          // Below threshold: partial cushion — soft landing, not a brick fall
-          const cushion = (st.emg / THRESHOLD) * GRAVITY;
-          st.vel -= cushion * dt;
-        }
-
+        // ── Fully proportional physics — no threshold cliff ──
+        // Net force = gravity - (emg × liftCoeff)
+        // At HOVER_EMG: net = 0 → hover. Below: falls. Above: rises.
+        const liftForce = st.emg * LIFT_COEFF;
+        st.vel += (GRAVITY - liftForce) * dt;
         st.vel  = Math.max(MAX_RISE, Math.min(MAX_FALL, st.vel));
         st.birdY = Math.max(60, Math.min(GROUND - 50, st.birdY + st.vel * dt));
 
-        // ── Pipes + gap scoring ──
+        // ── Pipes + gap scoring + precision tracking ──
         for (const p of st.pipes) {
           p.x -= SPEED * dt;
           if (!p.scored && p.x + PIPE_W < BIRD_X - 20) {
             p.scored = true;
+            st.pipesAttempted++;
             const inGap = st.birdY - 20 >= p.topH && st.birdY + 20 <= p.topH + GAP;
-            if (inGap) { st.score += 10; st.combo += 1; }
+            if (inGap) { st.score += 10; st.combo += 1; st.pipesCleared++; }
             else { st.combo = 0; }
             setUi(u => ({ ...u, score: st.score, combo: st.combo }));
           }
@@ -208,13 +209,13 @@ export default function GameSparrow({ onBack }) {
       drawBird(ctx, BIRD_X, st.birdY, st.vel, st.birdFlash > 0);
       ctx.globalAlpha = 1;
 
-      drawEMGMeter(ctx, 22, 110, H - 210, st.emg, THRESHOLD);
+      drawEMGMeter(ctx, 22, 110, H - 210, st.emg, HOVER_EMG);
       setUi(u => ({ ...u, emg: st.emg }));
 
       rafRef.current = requestAnimationFrame(tick);
     };
 
-    if (stateRef.current.emgRaw > 0.12) stateRef.current.phase = 'playing';
+    if (stateRef.current.emgRaw > 0.02) stateRef.current.phase = 'playing';
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
   }, [screen]);
@@ -331,7 +332,7 @@ export default function GameSparrow({ onBack }) {
           <span style={{ fontFamily: PH.fontMono, fontSize: 10, letterSpacing: '0.1em', color: PH.inkDim }}>СИГНАЛ EMG</span>
           <span style={{ fontFamily: PH.fontMono, fontSize: 10, color: deviceConnected ? PH.lime : PH.inkFaint, fontWeight: 700 }}>{deviceConnected ? `● ${Math.round(emg * 100)}%` : '— НЕТ СИГНАЛА'}</span>
         </div>
-        <EMGWave width={W - 120} height={40} intensity={Math.max(emg, 0.4)} density={1.6} />
+        <EMGWave width={W - 120} height={40} intensity={deviceConnected ? Math.max(emg, 0.05) : 0.05} density={1.6} />
       </div>
 
       {/* Idle hint */}

@@ -14,7 +14,9 @@ const W = window.innerWidth, H = window.innerHeight;
 const GROUND     = H - 120;
 const RUNNER_X   = 200;
 const OBS_W      = 44, SPEED = 3.8;
-const THRESHOLD  = 0.50;   // slightly easier to trigger jump
+const THRESHOLD  = 0.20;   // low threshold — any real spike triggers jump
+const JUMP_BASE  = 12;     // minimum jump velocity
+const JUMP_SCALE = 14;     // extra velocity per EMG unit above threshold
 const INVINCIBLE_MS = 1000;
 const DURATIONS  = [30, 60, 90, 120];
 
@@ -47,7 +49,9 @@ export default function GamePulseRun({ onBack }) {
     score: 0, phase: 'idle',
     lastTime: null, hitTime: 0, runnerFlash: 0,
     duration: 60,
-    prevEmg: 0,   // for rising-edge jump detection
+    prevEmg: 0,        // for rising-edge jump detection
+    obsAttempted: 0,   // obstacles passed (in range)
+    obsCleared: 0,     // obstacles jumped over successfully
   });
 
   /* ── sensor → emgRaw ── */
@@ -55,7 +59,7 @@ export default function GamePulseRun({ onBack }) {
     if (!deviceConnected || !sensorData) { stateRef.current.emgRaw = 0; return; }
     const norm = Math.max(0, Math.min(1, sensorData.norm ?? 0));
     stateRef.current.emgRaw = norm;
-    if (norm > 0.12 && stateRef.current.phase === 'idle' && screen === 'playing') {
+    if (norm > 0.02 && stateRef.current.phase === 'idle' && screen === 'playing') {
       stateRef.current.phase = 'playing';
     }
   }, [sensorData, deviceConnected, screen]);
@@ -74,6 +78,8 @@ export default function GamePulseRun({ onBack }) {
     st.emgAvgCount = 0;
     st.prevEmg   = 0;
     st.score     = 0;
+    st.obsAttempted = 0;
+    st.obsCleared   = 0;
     st.lastTime  = null;
     st.phase     = 'idle';
     st.hitTime   = 0;
@@ -100,6 +106,8 @@ export default function GamePulseRun({ onBack }) {
             durationSec: st.duration,
             emgPeak: st.emgPeak,
             emgAvg: st.emgAvgCount > 0 ? st.emgAvgSum / st.emgAvgCount : 0,
+            precisionScore: st.obsAttempted > 0
+              ? Math.round(st.obsCleared / st.obsAttempted * 100) : 0,
           };
           setScreen('result');
           return 0;
@@ -134,9 +142,12 @@ export default function GamePulseRun({ onBack }) {
         if (st.emg > 0.01) { st.emgAvgSum += st.emg; st.emgAvgCount++; }
 
         // ── Jump: rising-edge trigger (spike detection) ──
+        // Height is proportional to EMG level at the moment of spike
         const crossedUp = st.prevEmg < THRESHOLD && st.emg >= THRESHOLD;
         if (!st.jumping && crossedUp) {
-          st.vel = -20; st.jumping = true;
+          const strength = Math.min(1, (st.emg - THRESHOLD) / (1 - THRESHOLD));
+          st.vel = -(JUMP_BASE + strength * JUMP_SCALE);
+          st.jumping = true;
         }
 
         // ── Runner physics ──
@@ -149,7 +160,12 @@ export default function GamePulseRun({ onBack }) {
         // ── Obstacles ──
         for (const o of st.obs) {
           o.x -= SPEED * dt;
-          if (o.x < RUNNER_X + 20 && !o.scored) { o.scored = true; st.score += 15; }
+          if (o.x < RUNNER_X + 20 && !o.scored) {
+            o.scored = true;
+            st.obsAttempted++;
+            // Cleared = runner was in the air when passing obstacle top
+            if (st.runnerY < -(o.h - 10)) { st.score += 15; st.obsCleared++; }
+          }
           if (o.x < -OBS_W) { o.x = W + 80; o.h = 50 + Math.random() * 60; o.scored = false; }
         }
 
@@ -205,7 +221,7 @@ export default function GamePulseRun({ onBack }) {
       rafRef.current = requestAnimationFrame(tick);
     };
 
-    if (stateRef.current.emgRaw > 0.12) stateRef.current.phase = 'playing';
+    if (stateRef.current.emgRaw > 0.02) stateRef.current.phase = 'playing';
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
   }, [screen]);
@@ -328,7 +344,7 @@ export default function GamePulseRun({ onBack }) {
             {deviceConnected ? `● ${pct}%` : '— НЕТ СИГНАЛА'}
           </span>
         </div>
-        <EMGWave width={W - 120} height={40} intensity={Math.max(emg, 0.4)} density={1.6} />
+        <EMGWave width={W - 120} height={40} intensity={deviceConnected ? Math.max(emg, 0.05) : 0.05} density={1.6} />
       </div>
 
       {/* Idle hint */}

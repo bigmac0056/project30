@@ -49,7 +49,7 @@ export default function GameSteadyClimb({ onBack }) {
     if (!deviceConnected || !sensorData) { stateRef.current.emgRaw = 0; return; }
     const norm = Math.max(0, Math.min(1, sensorData.norm ?? 0));
     stateRef.current.emgRaw = norm;
-    if (norm > 0.12 && stateRef.current.phase === 'idle' && screen === 'playing') {
+    if (norm > 0.02 && stateRef.current.phase === 'idle' && screen === 'playing') {
       stateRef.current.phase = 'playing';
     }
   }, [sensorData, deviceConnected, screen]);
@@ -92,6 +92,7 @@ export default function GameSteadyClimb({ onBack }) {
             emgAvg: st.emgAvgCount > 0 ? st.emgAvgSum / st.emgAvgCount : 0,
             meters: Math.round(st.meters),
             holdSec: +st.hold.toFixed(1),
+            precisionScore: Math.round((st.hold / st.duration) * 100),
           };
           setScreen('result');
           return 0;
@@ -127,12 +128,21 @@ export default function GameSteadyClimb({ onBack }) {
         if (st.emg > st.emgPeak) st.emgPeak = st.emg;
         if (st.emg > 0.01) { st.emgAvgSum += st.emg; st.emgAvgCount++; }
 
-        // Climb logic — dt is in seconds here (FIXED: was rawDt)
+        // Climb logic — proportional: closer to zone center = faster climb
+        // Zone center = (TARGET_MIN + TARGET_MAX) / 2
+        const zoneCenter = (TARGET_MIN + TARGET_MAX) / 2;
+        const zoneHalf   = (TARGET_MAX - TARGET_MIN) / 2;
+        // 0 at zone edge → 1 at zone center
+        const zoneFraction = inZone
+          ? 1 - Math.abs(st.emg - zoneCenter) / zoneHalf
+          : 0;
+
         if (inZone) {
           st.hold += dt;
-          st.meters += dt;          // 1 second in zone = 1 meter
-          st.score += dt * 20;
-          st.climberProgress = Math.min(st.climberProgress + dt * 0.04, 1);
+          const climbRate = 0.5 + zoneFraction * 1.5;   // 0.5–2.0 m/s depending on precision
+          st.meters += dt * climbRate;
+          st.score  += dt * 20 * (0.5 + zoneFraction);  // bonus points for hitting center
+          st.climberProgress = Math.min(st.climberProgress + dt * 0.04 * (0.5 + zoneFraction * 0.5), 1);
         } else {
           st.hold = Math.max(0, st.hold - dt * 0.5);
           st.climberProgress = Math.max(0, st.climberProgress - dt * 0.01);
@@ -175,7 +185,7 @@ export default function GameSteadyClimb({ onBack }) {
       rafRef.current = requestAnimationFrame(tick);
     };
 
-    if (stateRef.current.emgRaw > 0.12) stateRef.current.phase = 'playing';
+    if (stateRef.current.emgRaw > 0.02) stateRef.current.phase = 'playing';
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
   }, [screen]);
@@ -305,7 +315,7 @@ export default function GameSteadyClimb({ onBack }) {
             {inZone ? `● В ЗОНЕ · ${pct}%` : `✕ ВНЕ ЗОНЫ · ${pct}%`}
           </span>
         </div>
-        <EMGWave width={W - METER_W - 180} height={40} intensity={Math.max(emg, 0.4)} density={1.6} />
+        <EMGWave width={W - METER_W - 180} height={40} intensity={deviceConnected ? Math.max(emg, 0.05) : 0.05} density={1.6} />
       </div>
 
       {/* Idle hint */}

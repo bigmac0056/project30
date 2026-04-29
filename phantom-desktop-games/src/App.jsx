@@ -40,7 +40,7 @@ function AppInner() {
 
   if (!user) return <AuthPage />;
 
-  const handleGameEnd = async ({ score, game, durationSec, emgPeak, emgAvg }) => {
+  const handleGameEnd = async ({ score, game, durationSec, emgPeak, emgAvg, precisionScore }) => {
     setScreen('home');
     try {
       await api.createSession({
@@ -50,7 +50,8 @@ function AppInner() {
         emg_peak: emgPeak,
         emg_avg: emgAvg,
         activation_score: Math.min(100, Math.round(emgPeak * 100)),
-        precision_score:  Math.min(100, Math.round(score / 10)),
+        // Real precision: % of obstacles cleared (Sparrow/PulseRun) or % of time in zone (SteadyClimb)
+        precision_score:  Math.min(100, precisionScore ?? 0),
         dosing_score:     Math.min(100, Math.round(emgAvg * 100)),
       });
     } catch { /* silent */ }
