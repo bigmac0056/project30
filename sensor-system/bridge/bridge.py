@@ -50,7 +50,7 @@ async def run_bridge() -> None:
         try:
             async with websockets.connect(
                 ws_url,
-                additional_headers={"X-Device-Token": token},
+                extra_headers={"X-Device-Token": token},
                 ping_interval=20,
                 ping_timeout=10,
             ) as ws:
